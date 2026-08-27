@@ -1,0 +1,29 @@
+# 에이전트별 모델/파라미터 설정
+# 예시:
+# drafter:
+#   model: gpt-4o-mini
+#   temperature: 0.2
+
+drafter:
+  #provider: "gemini" # openai_compatible | nvidia_nim | gemini
+  #model: "gemini-3.5-flash-lite" # 저비용: 목차/초안 뼈대 작성
+  #api_key_env: "GEMINI_API_KEY"
+  provider: "nvidia_nim"
+  model: "google/gemma-4-31b-it"
+  base_url: "https://integrate.api.nvidia.com/v1"
+  api_key_env: "NIM_API_KEY"
+
+researcher:
+  provider: "nvidia_nim"
+  model: "nvidia/nemotron-3.5-lightning-30b-a3b" # 저비용: 다회 호출 조사/요약
+  base_url: "https://integrate.api.nvidia.com/v1"
+  api_key_env: "NIM_API_KEY"
+
+expander:
+  #provider: "gemini"
+  #model: "gemini-3.5-flash" # 품질/비용 균형: 본문 확장
+  #api_key_env: "GEMINI_API_KEY"
+  provider: "nvidia_nim"
+  model: "nvidia/nemotron-3-ultra-550b-a55b"
+  base_url: "https://integrate.api.nvidia.com/v1"
+  api_key_env: "NIM_API_KEY"

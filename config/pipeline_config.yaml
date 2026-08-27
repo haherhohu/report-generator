@@ -1,0 +1,5 @@
+# 파이프라인 전역 설정
+max_loops: 2
+max_concurrency: 5
+target_6_min_length: 3000
+target_total_min_length: 200000

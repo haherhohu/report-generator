@@ -1,0 +1,15 @@
+# os
+.DS_Store
+
+# python
+.venv/
+__pycache__/
+
+# user api key
+.env
+
+# user workspace
+workspace/
+
+# user
+trash/
