@@ -29,12 +29,21 @@ def run_gatekeeper(state):
     # =================================================================
     # [PATCH 1] KeyError 방지 및 리뷰어 피드백 최우선 존중 (덮어쓰기 방지)
     # =================================================================
+
+    # [수정] 리뷰어의 챕터 누락/재작업 지시를 최우선으로 존중 (덮어쓰기 방지)
+    target_for_loop = state.get("target_sections_for_loop", [])
+    if target_for_loop:
+        print(f"    -> [긴급] 리뷰어 누락/수정 지시 감지: 타겟 챕터 {target_for_loop}")
+        print("    -> [조치] 분량 심사를 건너뛰고 누락/수정 챕터 생성을 위해 회귀합니다.")
+        # 리뷰어가 이미 state['target_sections_for_loop']에 누락 챕터를 담아두었으므로 그대로 반환
+        state["next_step"] = "researcher"
+        return state
+    
     reviewer_feedback = state.get("reviewer_feedback", "")
     
     if "누락된 챕터" in reviewer_feedback:
         print(f"    -> [긴급] 리뷰어 누락 경고 감지: {reviewer_feedback}")
         print("    -> [조치] 챕터가 아예 없습니다! 분량 심사를 건너뛰고 누락 챕터 생성을 위해 회귀합니다.")
-        # 리뷰어가 이미 state['target_sections_for_loop']에 누락 챕터를 담아두었으므로 그대로 반환
         state["next_step"] = "researcher"
         return state
 
@@ -91,8 +100,7 @@ def run_gatekeeper(state):
     else:
         print(f"    -> [통과] 4~6장 코어 논리 분량 확보 (현재 {core_total_length}자).")
 
-    # 2. 전체 분량 방어 (설정값 100,000자 기준)
-    # 3. 전체 분량 방어 (2~3장에 전가)
+    # 2. 전체 분량 방어 (설정값 100,000자 기준) (2~3장에 전가)
     total_length = sum(len(s.get('content', '')) for s in sections)
     # total_length = sum(len(s['content']) for s in sections)
     target_total = state.get("target_total_min_length", DEFAULT_TOTAL_MIN_LENGTH)
@@ -115,7 +123,7 @@ def run_gatekeeper(state):
         return state # 필요한 자료조사부터 재실행
         
     print("    -> [승인] 모든 제약 조건 통과(또는 루프 소진). 최종 검토 단계로 이동.")
-    state["next_step"] = "reviewer"
+    state["next_step"] = "merger"
 
     return state # 상태를 그대로 다음 노드로 넘김
     

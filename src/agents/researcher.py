@@ -9,7 +9,26 @@ from src.utils.model_client import build_llm
 # API 셧다운 방지를 위한 지수 백오프 재시도 데코레이터 (최대 3회, 대기시간 점진적 증가)
 @retry(wait=wait_exponential(multiplier=2, min=2, max=10), stop=stop_after_attempt(3))
 def invoke_llm_with_retry(chain, inputs):
-    return chain.invoke(inputs)
+    try:
+        return chain.invoke(inputs)
+    except Exception as e:
+        print("\n================ [에러 추적 리포트] ================")
+        print(f"1. 에러 원문: {str(e)}")
+        
+        # 체인 내부에 바인딩된 LLM 객체에서 모델명 추출
+        try:
+            # chain이 프롬프트|LLM 구조일 경우 step 뒤쪽에 LLM이 있음
+            llm_step = chain.last if hasattr(chain, 'last') else chain
+            if hasattr(llm_step, 'model_name'):
+                print(f"2. 전송된 모델명: {llm_step.model_name}")
+            else:
+                print("2. 전송된 모델명: (직접 속성 확인 불가)")
+        except:
+            pass
+        print("====================================================\n")
+        
+        # tenacity가 재시도할 수 있도록 에러를 다시 던짐
+        raise e
 
 
 @retry(wait=wait_exponential(multiplier=2, min=2, max=10), stop=stop_after_attempt(3))
@@ -28,7 +47,7 @@ def run_researcher(state):
         system_prompt = f.read()
         
     researcher_config = config.get("researcher", {})
-    model_name = researcher_config.get("model", "gpt-4o-mini")
+    model_name = researcher_config.get("model", "google/gemma-4-31b-it")
     
     # 2. LLM 인스턴스화 (GitHub Models 연동 유지)
     llm = build_llm(

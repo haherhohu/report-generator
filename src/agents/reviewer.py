@@ -15,9 +15,10 @@ def run_reviewer(state):
     # dict 내에 'chapter_id'나 'title' 같은 식별자가 있다고 가정합니다.
     # (실제 데이터 구조에 맞게 키값을 조정하셔야 합니다)
     current_chapter_ids = {sec.get("chapter_id") for sec in expanded_sections if sec.get("chapter_id")}
-    
-    # 2. 필수 챕터 누락 여부 검증 (Hard-coded Python Logic)
-    expected_body_ids = {2, 3, 4, 5, 6, 7, 8, 9}
+    #current_chapter_ids = {sec.get("section_index") for sec in expanded_sections if sec.get("section_index")}
+
+    # 2. 필수 챕터 누락 여부 검증 (Hard-coded Python Logic), 9장은 AI생성 안함.
+    expected_body_ids = {1, 2, 3, 4, 5, 6, 7, 8}
     missing_body_ids = expected_body_ids - current_chapter_ids
     
     # 3. 상태 분기에 따른 피드백 및 루프 제어
@@ -32,11 +33,11 @@ def run_reviewer(state):
         state["target_sections_for_loop"] = list(missing_body_ids)
         # Gatekeeper가 이 피드백을 보고 next_step을 'researcher'로 돌리도록 유도
         
-    elif 1 not in current_chapter_ids:
+    #elif 1 not in current_chapter_ids:
         # 본문(2~9)은 다 있는데 1장(개요)이 없는 경우 -> 1장 작성 지시
-        print("  [Reviewer] 2~9장 본문 생성 확인. 1장(종합 개요) 생성 프로세스로 진입해야 함.")
-        state["reviewer_feedback"] = "2~9장의 내용을 종합하여 1장(개요 및 요약)을 생성하십시오."
-        state["target_sections_for_loop"] = [1]
+        #print("  [Reviewer] 2~9장 본문 생성 확인. 1장(종합 개요) 생성 프로세스로 진입해야 함.")
+        #state["reviewer_feedback"] = "2~9장의 내용을 종합하여 1장(개요 및 요약)을 생성하십시오."
+        #state["target_sections_for_loop"] = [1]
         
     else:
         # 모든 챕터(1~9)가 존재하는 경우 -> LLM을 통한 정성적 품질 평가로 진입 (필요시)

@@ -16,7 +16,7 @@ def route_after_gatekeeper(state: ReportState) -> str:
     next_step = state.get("next_step")
     # researcher로 가기 전, 리뷰어 검증을 거치도록 강제함
     if next_step == "researcher":
-        return "reviewer" 
+        return "researcher" 
     return "merger"
 
 # 워크플로우 정의

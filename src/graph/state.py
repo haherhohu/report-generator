@@ -20,3 +20,4 @@ class ReportState(TypedDict):
     target_total_min_length: NotRequired[int]
     next_step: NotRequired[str]
     final_report_path: NotRequired[str]
+    completed_sections: NotRequired[list[str]]

@@ -1,6 +1,7 @@
 # src/agents/expander.py
 import json
 import re
+from click import prompt
 import yaml
 import asyncio
 from langchain_core.prompts import ChatPromptTemplate
@@ -66,7 +67,62 @@ async def process_single_section(section_data, global_topic, global_direction, l
         # previous_summary = section_data.get('previous_summary', '첫 번째 섹션입니다.')
         specific_instruction = section_data.get("specific_instruction", "지시사항을 엄격히 준수하여 섹션 본문을 작성할 것.")
         
-        
+        # [추가] 챕터 성격 분류 (8장 부록, 9장 참고문헌 식별)
+        section_index = section_data.get("section_index", 99)
+        is_data_chapter = section_index in [8, 9] or "참고문헌" in section_data['title'] or "부록" in section_data['title']
+
+        # =================================================================
+        # Step 0: 데이터 챕터 분리
+        # =================================================================
+        if is_data_chapter:
+            # 8, 9장은 목차 기획을 생략하고 그대로 시작
+            print(f"      -> [우회] '{section_data['title']}'은(는) 데이터 취합 챕터이므로 세부 목차 기획을 생략합니다.")
+
+            prompt = ChatPromptTemplate.from_messages([
+                        ("system", system_prompt),
+                        ("human", """
+                        전체 보고서 주제: {topic}
+                        핵심 방향성: {direction}
+                                                
+                        [현재 섹션 참고 자료] (이 데이터를 기반으로 사실적이고 구체적으로 작성할 것)
+                        {section_context}
+                        
+                        작성할 섹션 제목: {section_title}
+                        
+                        지시사항:
+                        1. 분량을 요약하거나 축약하지 말고, 위 참고 자료의 데이터와 예시를 세분화하여 논리적으로 팽창시키시오.
+                        2. 모든 문장의 끝맺음은 '~함', '~임' 형태의 공식적인 톤앤매너를 유지하시오.
+                        3. 가독성을 위해 개조식을 적절히 혼용하되, 본문은 설명조로 구체적으로 서술하시오.
+                        4. 시각 자료가 필요한 위치에는 [이미지 프롬프트: 설명] 형태로 주석을 남기시오.
+                        """)
+                    ])            
+            chain = prompt | llm
+                    
+            # 비동기 LLM 호출
+            response = await chain.ainvoke({
+                "topic": global_topic,
+                "direction": global_direction,
+                "section_context": section_context,
+                "section_title": section_data['title']
+            })
+            
+            # 파일 저장 (Append-Only)
+            safe_title = section_data['title'].replace(" ", "_").replace("/", "_")
+            file_path = f"workspace/report/{global_topic}_v3_{safe_title}_v1.md"
+            saved_path = save_file_append_only(file_path, response.content)
+            
+            print(f"    -> [Expander] '{section_data['title']}' 완료. ({saved_path})")
+
+            # 데이터 챕터면 걍 이거만 쓰고 스킵
+            return {
+                "section_id": section_data.get("section_id"),
+                "title": section_data['title'],
+                "section_index": section_data.get("section_index", 99),
+                "draft_path": saved_path,
+                "content": response.content # 응답을 그대로 리턴
+            }  
+
+        # else 
         # =================================================================
         # Step 1: 세부 목차(Sub-TOC) 선행 기획
         # =================================================================
@@ -81,8 +137,8 @@ async def process_single_section(section_data, global_topic, global_direction, l
             {section_context}
             
             지시사항:
-            위 참고 자료를 바탕으로, 이 챕터 안에서 논리를 전개하기 위한 세부 목차(Sub-TOC) 3~5개를 기획하십시오.
-            출력은 반드시 파이썬 리스트 형태의 순수 JSON 배열로만 하십시오. (예: ["1. 현황 및 문제점 분석", "2. 주요 사례", "3. 개선 전략 도출"])
+            위 참고 자료를 바탕으로, 이 챕터 안에서 논리를 전개하기 위한 세부 목차(Sub-TOC)를 기획하십시오.
+            출력은 반드시 파이썬 리스트 형태의 순수 JSON 배열로만 하십시오. (예: ["목차 1", "목차 2"])
             코드 블록(```)은 절대 사용하지 마십시오.
             """)
         ])
@@ -117,32 +173,34 @@ async def process_single_section(section_data, global_topic, global_direction, l
         
         accumulated_summary = section_data.get('previous_summary', '이전 섹션 내용 없음.')
         final_full_content = ""
-        
+
         for sub_toc in sub_tocs:
             print(f"      -> [{section_data['title']}] '{sub_toc}' 파트 팽창 중...")
+            # [추가] 데이터 챕터와 일반 챕터의 프롬프트 완전 분리
+            human_prompt = """
+            전체 보고서 주제: {topic}
+            핵심 방향성: {direction}
+            현재 챕터: {section_title}
+            ★ 지금 당신이 작성할 세부 목차: {sub_toc}
             
+            [이전까지의 맥락 요약] (이 내용은 중복 작성하지 말 것)
+            {accumulated_summary}
+            
+            [현재 챕터 참고 자료]
+            {section_context}
+            
+            지시사항:
+            1. 챕터를 통째로 쓰지 마십시오! 오직 지정된 세부 목차('{sub_toc}')에 대한 본문만 작성하십시오.
+            2. {specific_instruction}
+            3. 참고 자료의 팩트를 바탕으로 논리를 전개하되, 억지스러운 분량 팽창은 삼가십시오.
+            4. 모든 문장은 '~함', '~임'으로 끝내십시오.
+            5. 제목(세부 목차)을 마크다운(###)으로 가장 상단에 한 번만 적고 내용을 시작하십시오.
+            """
+
             content_prompt = ChatPromptTemplate.from_messages([
                 ("system", system_prompt),
-                ("human", """
-                전체 보고서 주제: {topic}
-                핵심 방향성: {direction}
-                현재 챕터: {section_title}
-                ★ 지금 당신이 작성할 세부 목차: {sub_toc}
-                
-                [이전까지의 맥락 요약] (이 내용은 중복 작성하지 말 것)
-                {accumulated_summary}
-                
-                [현재 챕터 참고 자료]
-                {section_context}
-                
-                지시사항:
-                1. 챕터를 통째로 쓰지 마십시오! 오직 지정된 세부 목차('{sub_toc}')에 대한 본문만 작성하십시오.
-                2. {specific_instruction}
-                3. 참고 자료의 팩트를 쪼개어 구체적인 설명조로 분량을 충분히 팽창시키십시오.
-                4. 모든 문장은 '~함', '~임'으로 끝내십시오.
-                5. 제목(세부 목차)을 마크다운(###)으로 가장 상단에 한 번만 적고 내용을 시작하십시오.
-                """)
-            ])            
+                ("human", human_prompt)
+            ])      
             # 비동기 LLM 호출
             # API 호출 (Sub-TOC 단위로 가볍게 호출)
             content_response = await (content_prompt | llm).ainvoke({
@@ -158,17 +216,18 @@ async def process_single_section(section_data, global_topic, global_direction, l
             # [수정] 껍데기 벗기기: 파일 저장 전 스마트 추출기로 순수 텍스트만 확보
             safe_content = extract_text_smartly(content_response.content)
             
-            # 물리적 파일에 이어붙이기 (Append-Only)
-            # [수정] response.content 대신 safe_content를 넘김
-            saved_path = save_file_append_only(file_path, f"\n\n{safe_content}")
+            # 콘텐츠 누적 (파일 저장은 루프 종료 후 한 번만 수행)
             final_full_content += f"\n\n{safe_content}"
             
             # 컨텍스트 다이어트: 전체 글을 들고 다니지 않고, 방금 쓴 목차가 끝났다는 한 줄 메모만 누적
             accumulated_summary += f"\n- {sub_toc} : 작성 완료됨."
 
+        # 루프 종료 후 전체 콘텐츠를 한 번에 파일로 저장
+        saved_path = save_file_append_only(file_path, final_full_content.strip())
         print(f"    -> [Expander] '{section_data['title']}' 모든 세부 목차 완료. ({saved_path})")
         
         return {
+            "section_id": section_data.get("section_id"),
             "title": section_data['title'],
             "section_index": section_data.get("section_index", 99),
             "draft_path": saved_path,
@@ -178,7 +237,9 @@ async def process_single_section(section_data, global_topic, global_direction, l
 
 async def run_expander_async(state):
     """LangGraph에서 호출될 병렬 처리 래퍼 함수"""
-    print(f"  [Expander] 총 {len(state.get('sections', []))}개 섹션 병렬 보강 시작...")
+    completed_sections = state.get('completed_sections', [])
+    all_sections = state.get('sections', [])
+    print(f"  [Expander] 총 {len(all_sections)}개 섹션 중 {len(completed_sections)}개 완료됨. 병렬 보강 시작...")
 
     max_concurrency = int(state.get("max_concurrency", DEFAULT_MAX_CONCURRENCY))
     concurrency_limit = asyncio.Semaphore(max(1, max_concurrency))
@@ -201,7 +262,7 @@ async def run_expander_async(state):
 
     # 1. 라우팅: 챕터 성격에 맞게 데이터와 지침 분배
     routed_sections = map_references_to_sections(
-        state.get('sections', []), 
+        all_sections, 
         state.get('source_materials', []),
         state.get('direction', '')
     )
@@ -215,15 +276,23 @@ async def run_expander_async(state):
             if any(str(s.get("title", "")).startswith(str(target)) for target in loop_targets)
         ]
 
+    # [추가] 이미 완료된 섹션 필터링 (Resume 기능)
+    # loop_targets가 있을 때는 해당 타겟 내에서만 필터링하고, 없을 때는 전체에서 필터링함
+    routed_sections = [
+        s for s in routed_sections 
+        if s.get('title') not in completed_sections
+    ]
+
+    if not routed_sections:
+        print("  [Expander] 모든 대상 섹션이 이미 완료되었습니다. 스킵합니다.")
+        return state
+
     if not routed_sections:
         raise ValueError("[Expander] 보강할 섹션이 없습니다. Drafter에서 sections 생성 여부를 확인하세요.")
 
     # 2. 비동기(Async) Map-Reduce 실행
     full_run = not bool(loop_targets)
     if full_run:
-        chapter_1_sections = [s for s in routed_sections if s.get("section_index") == 1]
-        non_intro_sections = [s for s in routed_sections if s.get("section_index") != 1]
-
         tasks = [
             process_single_section(
                 section,
@@ -233,32 +302,9 @@ async def run_expander_async(state):
                 system_prompt,
                 concurrency_limit
             )
-            for section in non_intro_sections
+            for section in routed_sections
         ]
         expanded_results = await asyncio.gather(*tasks) if tasks else []
-
-        if chapter_1_sections:
-            chapter_summary = "\n".join(
-                [
-                    f"- {item.get('title', '')}: {(item.get('content', '')[:400]).strip()}"
-                    for item in expanded_results
-                ]
-            )
-            intro_section = dict(chapter_1_sections[0])
-            intro_section["context_data"] = (
-                intro_section.get("context_data", "")
-                + "\n\n[2~9장 작성 결과 요약]\n"
-                + chapter_summary
-            )
-            intro_result = await process_single_section(
-                intro_section,
-                state['topic'],
-                state.get('direction', ''),
-                llm,
-                system_prompt,
-                concurrency_limit,
-            )
-            expanded_results.append(intro_result)
     else:
         tasks = [
             process_single_section(
@@ -278,7 +324,12 @@ async def run_expander_async(state):
         state.get("expanded_sections", []),
         expanded_results,
     )
-    print("  [Expander] 모든 섹션 병렬 보강 완료.")
+    
+    # [추가] 완료된 섹션 목록 업데이트
+    newly_completed = [res['title'] for res in expanded_results]
+    state["completed_sections"] = list(set(completed_sections + newly_completed))
+    
+    print(f"  [Expander] {len(newly_completed)}개 섹션 보강 완료. 총 {len(state['completed_sections'])}개 섹션 완료됨.")
     
     return state # 상태를 그대로 다음 노드로 넘김
 

@@ -4,7 +4,7 @@
 #   model: gpt-4o-mini
 #   temperature: 0.2
 
-drafter:
+drafter: # 얘는 진짜 초안용
   #provider: "gemini" # openai_compatible | nvidia_nim | gemini
   #model: "gemini-3.5-flash-lite" # 저비용: 목차/초안 뼈대 작성
   #api_key_env: "GEMINI_API_KEY"
@@ -12,18 +12,50 @@ drafter:
   model: "google/gemma-4-31b-it"
   base_url: "https://integrate.api.nvidia.com/v1"
   api_key_env: "NIM_API_KEY"
+  max_tokens: 4096
 
-researcher:
+researcher: # 저비용: 다회 호출 조사/요약 모델임
+  #provider: "gemini" # openai_compatible | nvidia_nim | gemini
+  #model: "gemini-3.1-flash-lite" # 저비용: 목차/초안 뼈대 작성
+  #api_key_env: "GEMINI_API_KEY"
   provider: "nvidia_nim"
-  model: "nvidia/nemotron-3.5-lightning-30b-a3b" # 저비용: 다회 호출 조사/요약
+  model: "nvidia/nemotron-3.5-lightning-30b-a3b"
   base_url: "https://integrate.api.nvidia.com/v1"
   api_key_env: "NIM_API_KEY"
+  max_tokens: 16384
 
-expander:
+expander: # 고비용: 논리적으로 추론해야 함
   #provider: "gemini"
   #model: "gemini-3.5-flash" # 품질/비용 균형: 본문 확장
   #api_key_env: "GEMINI_API_KEY"
   provider: "nvidia_nim"
-  model: "nvidia/nemotron-3-ultra-550b-a55b"
+  # model: "nvidia/nemotron-3-ultra-550b-a55b" # 얘가 503, 504는 자주 걸리는데 좋네
+  model: "nvidia/nemotron-3-super-120b-a12b"
   base_url: "https://integrate.api.nvidia.com/v1"
   api_key_env: "NIM_API_KEY"
+  max_tokens: 16384
+  extra_body:
+    reasoning_budget: 16384
+
+# gemini
+# 사용 가능한 모델:
+#   'deep-research-max-preview-04-2026', # 실제로는 사용불가
+#   'deep-research-preview-04-2026', # 실제로는 사용불가
+#   'gemini-3-flash-preview',
+#   'gemini-3.1-flash-lite',
+#   'gemini-3.1-pro-preview',
+#   'gemini-3.5-flash', # 호출횟수 굉장히 적음
+#   'gemini-3.5-flash-lite'
+#
+# nvidia_nim
+# 사용 가능한 모델:
+#   'nvidia/nemotron-3.5-lightning-30b-a3b', # 저비용: 다회 호출 조사/요약
+#   'nvidia/nemotron-3-ultra-550b-a55b' # 초대형: 504, 503 에러 잘 남
+#   'nvidia/nemotron-3-super-120b-a12b' # 550 아래 체급
+#   'nvidia/nemotron-3-nano-30b-a3b' # 나노체급인듯
+#   'meta/llama-3.3-70B-instruct' # 경량이라는데 안 뜬다?
+#   'meta/llama-3.1-70B-instruct' # deprecated
+#   'mistral/mistral-nemotron'
+#   'google/gemma-4-31b-it'
+#   'openai/gpt-oss-20b' # gpt
+#   'openai/gpt-oss-120b' # gpt
