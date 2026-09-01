@@ -1,19 +1,39 @@
 # src/agents/expander.py
 import json
 import re
-from click import prompt
 import yaml
 import asyncio
-from langchain_core.prompts import ChatPromptTemplate
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type # 추가
-from langchain_openai.chat_models.base import OpenAIAPIError # 추가
-from src.utils.file_manager import save_file_append_only
+
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from langchain_openai.chat_models.base import OpenAIAPIError
+
+from src.utils.file_manager import (
+    save_file_append_only,
+    build_report_artifact_path,
+    register_artifact,
+)
 from src.utils.router import map_references_to_sections
 from src.utils.model_client import build_llm
 from src.utils.parser import extract_text_smartly
+from src.utils.prompting import ainvoke_prompt, trim_prompt_context
 
 
 DEFAULT_MAX_CONCURRENCY = 3
+
+
+def _normalize_section_key(value):
+    """완료 상태 비교를 위해 섹션 제목을 안전하게 정규화합니다."""
+    if value is None:
+        return ""
+    text = str(value).strip().lower()
+    text = re.sub(r"[\s\-_/]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _canonical_title(value):
+    """입력된 섹션 제목을 저장용으로 정리합니다."""
+    text = str(value or "").strip()
+    return re.sub(r"\s+", " ", text)
 
 
 def _chapter_number_from_title(title):
@@ -63,9 +83,17 @@ async def process_single_section(section_data, global_topic, global_direction, l
         
         # 1. 청킹(Chunking)된 컨텍스트 조립
         # Rule: 전체가 아닌 '해당 섹션용 자료'만 주입하여 중언부언 차단
-        section_context = section_data.get('context_data', section_data.get('reference_content', '할당된 참고 자료 없음.'))
-        # previous_summary = section_data.get('previous_summary', '첫 번째 섹션입니다.')
+        raw_context = section_data.get('context_data', section_data.get('reference_content', '할당된 참고 자료 없음.'))
         specific_instruction = section_data.get("specific_instruction", "지시사항을 엄격히 준수하여 섹션 본문을 작성할 것.")
+        section_context = trim_prompt_context(
+            raw_context,
+            max_chars=max_context_chars,
+            required_fragments=[
+                f"전체 보고서 주제: {global_topic}",
+                f"핵심 방향성: {global_direction}",
+                f"지시사항: {specific_instruction}",
+            ],
+        )
         
         # [추가] 챕터 성격 분류 (8장 부록, 9장 참고문헌 식별)
         section_index = section_data.get("section_index", 99)
@@ -75,81 +103,69 @@ async def process_single_section(section_data, global_topic, global_direction, l
         # Step 0: 데이터 챕터 분리
         # =================================================================
         if is_data_chapter:
-            # 8, 9장은 목차 기획을 생략하고 그대로 시작
             print(f"      -> [우회] '{section_data['title']}'은(는) 데이터 취합 챕터이므로 세부 목차 기획을 생략합니다.")
 
-            prompt = ChatPromptTemplate.from_messages([
-                        ("system", system_prompt),
-                        ("human", """
-                        전체 보고서 주제: {topic}
-                        핵심 방향성: {direction}
-                                                
-                        [현재 섹션 참고 자료] (이 데이터를 기반으로 사실적이고 구체적으로 작성할 것)
-                        {section_context}
-                        
-                        작성할 섹션 제목: {section_title}
-                        
-                        지시사항:
-                        1. 분량을 요약하거나 축약하지 말고, 위 참고 자료의 데이터와 예시를 세분화하여 논리적으로 팽창시키시오.
-                        2. 모든 문장의 끝맺음은 '~함', '~임' 형태의 공식적인 톤앤매너를 유지하시오.
-                        3. 가독성을 위해 개조식을 적절히 혼용하되, 본문은 설명조로 구체적으로 서술하시오.
-                        4. 시각 자료가 필요한 위치에는 [이미지 프롬프트: 설명] 형태로 주석을 남기시오.
-                        """)
-                    ])            
-            chain = prompt | llm
-                    
-            # 비동기 LLM 호출
-            response = await chain.ainvoke({
-                "topic": global_topic,
-                "direction": global_direction,
-                "section_context": section_context,
-                "section_title": section_data['title']
-            })
-            
-            # 파일 저장 (Append-Only)
-            safe_title = section_data['title'].replace(" ", "_").replace("/", "_")
-            file_path = f"workspace/report/{global_topic}_v3_{safe_title}_v1.md"
+            response = await ainvoke_prompt(
+                llm,
+                system_prompt,
+                """
+                전체 보고서 주제: {topic}
+                핵심 방향성: {direction}
+
+                [현재 섹션 참고 자료] (이 데이터를 기반으로 사실적이고 구체적으로 작성할 것)
+                {section_context}
+
+                작성할 섹션 제목: {section_title}
+
+                지시사항:
+                1. 분량을 요약하거나 축약하지 말고, 위 참고 자료의 데이터와 예시를 세분화하여 논리적으로 팽창시키시오.
+                2. 모든 문장의 끝맺음은 '~함', '~임' 형태의 공식적인 톤앤매너를 유지하시오.
+                3. 가독성을 위해 개조식을 적절히 혼용하되, 본문은 설명조로 구체적으로 서술하시오.
+                4. 시각 자료가 필요한 위치에는 [이미지 프롬프트: 설명] 형태로 주석을 남기시오.
+                """,
+                topic=global_topic,
+                direction=global_direction,
+                section_context=section_context,
+                section_title=section_data['title'],
+            )
+
+            file_path = build_report_artifact_path(global_topic, "v3", section_title=section_data['title'])
             saved_path = save_file_append_only(file_path, response.content)
-            
             print(f"    -> [Expander] '{section_data['title']}' 완료. ({saved_path})")
 
-            # 데이터 챕터면 걍 이거만 쓰고 스킵
             return {
                 "section_id": section_data.get("section_id"),
                 "title": section_data['title'],
                 "section_index": section_data.get("section_index", 99),
                 "draft_path": saved_path,
-                "content": response.content # 응답을 그대로 리턴
-            }  
+                "content": response.content,
+            }
 
         # else 
         # =================================================================
         # Step 1: 세부 목차(Sub-TOC) 선행 기획
         # =================================================================
-        toc_prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt + "\n\n당신은 수석 기획자입니다. 전체를 다 쓰지 말고 목차만 기획하십시오."),
-            ("human", """
+        toc_response = await ainvoke_prompt(
+            llm,
+            system_prompt + "\n\n당신은 수석 기획자입니다. 전체를 다 쓰지 말고 목차만 기획하십시오.",
+            """
             전체 주제: {topic}
             작성할 챕터(섹션): {section_title}
             챕터별 추가 지시사항: {specific_instruction}
-            
+
             [참고 자료]
             {section_context}
-            
+
             지시사항:
             위 참고 자료를 바탕으로, 이 챕터 안에서 논리를 전개하기 위한 세부 목차(Sub-TOC)를 기획하십시오.
             출력은 반드시 파이썬 리스트 형태의 순수 JSON 배열로만 하십시오. (예: ["목차 1", "목차 2"])
             코드 블록(```)은 절대 사용하지 마십시오.
-            """)
-        ])
-
-        # 비동기 LLM 호출
-        toc_response = await (toc_prompt | llm).ainvoke({
-            "topic": global_topic,
-            "section_title": section_data['title'],
-            "specific_instruction": specific_instruction,
-            "section_context": section_context
-        })
+            """,
+            topic=global_topic,
+            section_title=section_data['title'],
+            specific_instruction=specific_instruction,
+            section_context=section_context,
+        )
         
         try:
             # JSON 배열 추출 안전장치
@@ -167,10 +183,8 @@ async def process_single_section(section_data, global_topic, global_direction, l
         # =================================================================
         # Step 2: 세부 목차별 순차 작성 (컨텍스트 다이어트) 및 Append-Only 저장
         # =================================================================
-        # 파일 저장 (Append-Only)
-        safe_title = section_data['title'].replace(" ", "_").replace("/", "_")
-        file_path = f"workspace/report/{global_topic}_v3_{safe_title}_v1.md"
-        
+        file_path = build_report_artifact_path(global_topic, "v3", section_title=section_data['title'])
+
         accumulated_summary = section_data.get('previous_summary', '이전 섹션 내용 없음.')
         final_full_content = ""
 
@@ -197,21 +211,18 @@ async def process_single_section(section_data, global_topic, global_direction, l
             5. 제목(세부 목차)을 마크다운(###)으로 가장 상단에 한 번만 적고 내용을 시작하십시오.
             """
 
-            content_prompt = ChatPromptTemplate.from_messages([
-                ("system", system_prompt),
-                ("human", human_prompt)
-            ])      
-            # 비동기 LLM 호출
-            # API 호출 (Sub-TOC 단위로 가볍게 호출)
-            content_response = await (content_prompt | llm).ainvoke({
-                "topic": global_topic,
-                "direction": global_direction,
-                "section_title": section_data['title'],
-                "sub_toc": sub_toc,
-                "accumulated_summary": accumulated_summary,
-                "section_context": section_context,
-                "specific_instruction": specific_instruction
-            })
+            content_response = await ainvoke_prompt(
+                llm,
+                system_prompt,
+                human_prompt,
+                topic=global_topic,
+                direction=global_direction,
+                section_title=section_data['title'],
+                sub_toc=sub_toc,
+                accumulated_summary=accumulated_summary,
+                section_context=section_context,
+                specific_instruction=specific_instruction,
+            )
             
             # [수정] 껍데기 벗기기: 파일 저장 전 스마트 추출기로 순수 텍스트만 확보
             safe_content = extract_text_smartly(content_response.content)
@@ -238,6 +249,7 @@ async def process_single_section(section_data, global_topic, global_direction, l
 async def run_expander_async(state):
     """LangGraph에서 호출될 병렬 처리 래퍼 함수"""
     completed_sections = state.get('completed_sections', [])
+    completed_keys = {_normalize_section_key(title) for title in completed_sections if title is not None}
     all_sections = state.get('sections', [])
     print(f"  [Expander] 총 {len(all_sections)}개 섹션 중 {len(completed_sections)}개 완료됨. 병렬 보강 시작...")
 
@@ -250,19 +262,19 @@ async def run_expander_async(state):
         system_prompt = f.read()
 
     expander_config = config.get("expander", {})
-    # 팽창을 위해서는 컨텍스트 윈도우가 크고 논리력이 좋은 모델 필요
     model_name = expander_config.get("model", "gpt-4o")
+    max_input_tokens = int(expander_config.get("max_input_tokens", 8000))
+    max_context_chars = max(2000, max_input_tokens // 2)
 
     llm = build_llm(
         agent_name="expander",
         agent_config=expander_config,
         default_model=model_name,
-        temperature=0.4, # 창의적인 팽창을 위해 온도 소폭 상승
+        temperature=0.4,
     )
 
-    # 1. 라우팅: 챕터 성격에 맞게 데이터와 지침 분배
     routed_sections = map_references_to_sections(
-        all_sections, 
+        all_sections,
         state.get('source_materials', []),
         state.get('direction', '')
     )
@@ -270,68 +282,56 @@ async def run_expander_async(state):
     loop_targets = list(state.get("target_sections_for_loop", []))
     if loop_targets:
         routed_sections = [
-            s
-            for s in routed_sections
-            # [수정된 부분] target을 강제로 문자열(str)로 변환하여 타입 에러 방지
+            s for s in routed_sections
             if any(str(s.get("title", "")).startswith(str(target)) for target in loop_targets)
         ]
 
-    # [추가] 이미 완료된 섹션 필터링 (Resume 기능)
-    # loop_targets가 있을 때는 해당 타겟 내에서만 필터링하고, 없을 때는 전체에서 필터링함
     routed_sections = [
-        s for s in routed_sections 
-        if s.get('title') not in completed_sections
+        s for s in routed_sections
+        if _normalize_section_key(s.get('title')) not in completed_keys
     ]
 
     if not routed_sections:
         print("  [Expander] 모든 대상 섹션이 이미 완료되었습니다. 스킵합니다.")
         return state
 
-    if not routed_sections:
-        raise ValueError("[Expander] 보강할 섹션이 없습니다. Drafter에서 sections 생성 여부를 확인하세요.")
+    tasks = [
+        process_single_section(
+            section,
+            state['topic'],
+            state.get('direction', ''),
+            llm,
+            system_prompt,
+            concurrency_limit,
+        )
+        for section in routed_sections
+    ]
+    expanded_results = await asyncio.gather(*tasks) if tasks else []
 
-    # 2. 비동기(Async) Map-Reduce 실행
-    full_run = not bool(loop_targets)
-    if full_run:
-        tasks = [
-            process_single_section(
-                section,
-                state['topic'],
-                state.get('direction', ''),
-                llm,
-                system_prompt,
-                concurrency_limit
-            )
-            for section in routed_sections
-        ]
-        expanded_results = await asyncio.gather(*tasks) if tasks else []
-    else:
-        tasks = [
-            process_single_section(
-                section,
-                state['topic'],
-                state.get('direction', ''),
-                llm,
-                system_prompt,
-                concurrency_limit
-            )
-            for section in routed_sections
-        ]
-        expanded_results = await asyncio.gather(*tasks)
-    
-    # 4. 상태(State) 업데이트
     state["expanded_sections"] = _merge_expanded_sections(
         state.get("expanded_sections", []),
         expanded_results,
     )
-    
-    # [추가] 완료된 섹션 목록 업데이트
-    newly_completed = [res['title'] for res in expanded_results]
-    state["completed_sections"] = list(set(completed_sections + newly_completed))
-    
-    print(f"  [Expander] {len(newly_completed)}개 섹션 보강 완료. 총 {len(state['completed_sections'])}개 섹션 완료됨.")
-    
-    return state # 상태를 그대로 다음 노드로 넘김
+
+    normalized_completed = [
+        _canonical_title(title)
+        for title in completed_sections + [res['title'] for res in expanded_results]
+        if title is not None
+    ]
+    state["completed_sections"] = list(dict.fromkeys(normalized_completed))
+
+    for result in expanded_results:
+        register_artifact(
+            state,
+            artifact_type="section-expanded",
+            title=result.get("title", "section"),
+            path=result.get("draft_path", ""),
+            detail=f"section_index={result.get('section_index', 0)}",
+        )
+
+    print(f"  [Expander] {len(expanded_results)}개 섹션 보강 완료. 총 {len(state['completed_sections'])}개 섹션 완료됨.")
+
+    return state
 
 # LangGraph 동기(Sync) 노드 환경을 위한 브릿지 함수
 def run_expander(state):

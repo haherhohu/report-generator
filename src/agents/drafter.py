@@ -4,9 +4,10 @@ import json
 import re
 
 from langchain_core.prompts import ChatPromptTemplate
-from src.utils.file_manager import save_file_append_only
+from src.utils.file_manager import save_file_append_only, build_report_artifact_path, register_artifact
 from src.utils.model_client import build_llm
 from src.utils.parser import extract_text_smartly
+from src.utils.prompting import invoke_prompt
 
 
 REQUIRED_CHAPTER_TITLES = {
@@ -200,9 +201,10 @@ def run_drafter(state):
 
         # 4. 파일 저장 (Append-Only 규칙 적용)
         # 파일명에 띄어쓰기가 있을 경우 언더스코어로 치환하여 저장 안정성 확보
-        safe_topic = state['topic'].replace("/", "_")#.replace(" ", "_")
-        file_path = f"workspace/report/{safe_topic}_v1.md"
+        safe_topic = state['topic'].replace("/", "_")
+        file_path = build_report_artifact_path(state['topic'], "v1")
         saved_path = save_file_append_only(file_path, draft_content)
+        register_artifact(state, artifact_type="draft", title="초안 v1", path=saved_path)
         sections = _extract_sections_from_draft(draft_content)
 
         # 섹션 추출 실패 대비 빈 껍데기 주입
@@ -289,8 +291,9 @@ def run_drafter(state):
         v1_response = (v1_prompt | llm).invoke({"topic": state["topic"], "direction": state["direction"]})
         draft_v1_content = extract_text_smartly(v1_response.content)
         
-        v1_path = f"workspace/report/{safe_topic}_v1.md"
+        v1_path = build_report_artifact_path(state['topic'], "v1")
         save_file_append_only(v1_path, draft_v1_content)
+        register_artifact(state, artifact_type="draft", title="초안 v1", path=v1_path)
         print(f"    -> [완료] 기초 초안(v1) 저장: {v1_path}")
         # 기본 타겟 초안은 v1으로 설정
         target_draft_content = draft_v1_content
@@ -320,8 +323,9 @@ def run_drafter(state):
             
             target_draft_content = extract_text_smartly(v2_response.content)
             
-            v2_path = f"workspace/report/{safe_topic}_v2.md"
+            v2_path = build_report_artifact_path(state['topic'], "v2")
             save_file_append_only(v2_path, target_draft_content)
+            register_artifact(state, artifact_type="draft", title="초안 v2", path=v2_path)
             print(f"    -> [완료] 업데이트 초안(v2) 저장: {v2_path}")
 
         

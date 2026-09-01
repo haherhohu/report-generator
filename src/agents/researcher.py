@@ -1,7 +1,7 @@
 # src/agents/researcher.py
 import yaml
 from langchain_core.prompts import ChatPromptTemplate
-from src.utils.file_manager import save_file_append_only
+from src.utils.file_manager import save_file_append_only, build_report_artifact_path, register_artifact
 from src.tools.web_search import perform_hybrid_research
 from tenacity import retry, wait_exponential, stop_after_attempt
 from src.utils.model_client import build_llm
@@ -112,11 +112,11 @@ def run_researcher(state):
 
 
         # 5. 조사 결과 파일 저장 (Append-Only)
-        safe_keyword = keyword.replace(" ", "_")
-        file_path = f"workspace/reference/research_{safe_keyword}_v1.md"
+        file_path = build_report_artifact_path(keyword, "research", base_dir="workspace/reference")
         saved_path = save_file_append_only(file_path, content)
+        register_artifact(state, artifact_type="research-note", title=f"{keyword} 조사", path=saved_path)
         collected_materials.append(
-            {"filename": f"research_{safe_keyword}.md", "content": content, "path": saved_path}
+            {"filename": f"research_{keyword}.md", "content": content, "path": saved_path}
         )
         reference_paths.append(saved_path)
     

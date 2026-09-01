@@ -5,6 +5,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.prompts import ChatPromptTemplate
 from src.utils.model_client import build_llm
 from src.utils.parser import extract_text_smartly
+from src.utils.prompting import trim_prompt_context, estimate_context_budget
 
 def run_preprocessing(raw_dir="workspace/raw_refs", summary_dir="workspace/source/summary"):
     """
@@ -31,7 +32,9 @@ def run_preprocessing(raw_dir="workspace/raw_refs", summary_dir="workspace/sourc
                     default_model=researcher_config.get("model", "meta/llama-3.1-8b-instruct"), # config에서 가져오거나 기본값 지정
                     temperature=0.0 # 요약 작업이므로 환각 방지를 위해 온도를 0으로 고정
     )
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=15000, chunk_overlap=1000)
+    max_input_tokens = int(researcher_config.get("max_input_tokens", 12000))
+    chunk_size = max(4000, min(16000, estimate_context_budget(max_input_tokens, default=12000) // 2))
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=max(250, chunk_size // 12))
 
     for filename in files_to_process:
         file_path = os.path.join(raw_dir, filename)
@@ -62,7 +65,18 @@ def run_preprocessing(raw_dir="workspace/raw_refs", summary_dir="workspace/sourc
             
             summaries = []
             for i, chunk in enumerate(chunks):
-                response = (prompt | llm).invoke({"text": chunk})
+                safe_chunk = trim_prompt_context(
+                    chunk,
+                    max_chars=max(3000, chunk_size * 2),
+                    required_fragments=[
+                        "규정",
+                        "예산",
+                        "기관명",
+                        "수치",
+                        "기술 사양",
+                    ],
+                )
+                response = (prompt | llm).invoke({"text": safe_chunk})
                 clean_text = extract_text_smartly(response.content)
                 summaries.append(clean_text)
                 

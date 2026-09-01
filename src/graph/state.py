@@ -21,3 +21,5 @@ class ReportState(TypedDict):
     next_step: NotRequired[str]
     final_report_path: NotRequired[str]
     completed_sections: NotRequired[list[str]]
+    artifact_history: NotRequired[list[dict[str, Any]]]
+    active_version: NotRequired[str]

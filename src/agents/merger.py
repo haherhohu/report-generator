@@ -1,5 +1,4 @@
-import os
-from src.utils.file_manager import save_file_append_only
+from src.utils.file_manager import save_file_append_only, build_report_artifact_path, register_artifact
 
 
 REQUIRED_CHAPTER_TITLES = {
@@ -77,10 +76,10 @@ def run_merger(state):
         merged_content += "1. 제공된 기초 벤치마킹 자료 및 웹 수집 자료 일체\n"
 
     # 3. 최종 파일 저장 (Append-Only 규칙 적용)
-    safe_topic = state['topic'].replace(" ", "_").replace("/", "_")
-    file_path = f"workspace/report/{safe_topic}_v3_final.md"
+    file_path = build_report_artifact_path(state['topic'], 'v3_final')
     saved_path = save_file_append_only(file_path, merged_content)
-    
+    register_artifact(state, artifact_type='final-report', title='최종 보고서', path=saved_path)
+
     state["final_report_path"] = saved_path
     print(f"  [Merger] ✅ 최종 보고서 취합 완료. 저장 경로: {saved_path}")
     

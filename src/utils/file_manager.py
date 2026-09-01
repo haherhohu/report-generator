@@ -1,17 +1,26 @@
 import os
 import re
 
-def save_file_append_only(path, content):
-    # 덮어쓰기 방지 로직 구현
-    """
-    기존 파일 덮어쓰기를 방지하고 새로운 이름으로 저장합니다.
-    """
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    
+
+def normalize_slug(value, *, fallback="report"):
+    text = str(value or fallback).strip()
+    text = re.sub(r"[^0-9A-Za-z가-힣_.\-\s]+", "_", text)
+    text = re.sub(r"[\s/\\]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    return text or fallback
+
+
+def next_versioned_path(path):
+    """주어진 경로에 대해 새 버전을 붙인 경로를 계산합니다."""
+    if not path:
+        raise ValueError("path must not be empty")
+
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+
     base, ext = os.path.splitext(path)
     final_path = path
 
-    # 동일 파일 존재 시 _vN 패턴을 증가시킴 (예: v1 -> v2 -> v3)
     while os.path.exists(final_path):
         match = re.search(r"_v(\d+)$", base)
         if match:
@@ -20,9 +29,34 @@ def save_file_append_only(path, content):
         else:
             base = f"{base}_v2"
         final_path = f"{base}{ext}"
-        
-    # 'x' 모드(exclusive creation)로 열어 혹시 모를 동시 접근 충돌 원천 차단
+
+    return final_path
+
+
+def save_file_append_only(path, content):
+    """기존 파일 덮어쓰기를 방지하고 안전한 새 버전 경로를 생성합니다."""
+    final_path = next_versioned_path(path)
     with open(final_path, 'x', encoding='utf-8') as f:
         f.write(content)
-        
     return final_path
+
+
+def build_report_artifact_path(topic, phase, *, section_title=None, base_dir="workspace/report"):
+    safe_topic = normalize_slug(topic)
+    if section_title:
+        safe_title = normalize_slug(section_title)
+        return next_versioned_path(os.path.join(base_dir, f"{safe_topic}_{phase}_{safe_title}.md"))
+    return next_versioned_path(os.path.join(base_dir, f"{safe_topic}_{phase}.md"))
+
+
+def register_artifact(state, *, artifact_type, title, path, detail=None):
+    history = state.setdefault("artifact_history", [])
+    entry = {
+        "type": artifact_type,
+        "title": title,
+        "path": path,
+        "detail": detail or "",
+    }
+    history.append(entry)
+    state["active_version"] = path
+    return entry

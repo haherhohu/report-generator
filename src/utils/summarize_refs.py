@@ -5,6 +5,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.prompts import ChatPromptTemplate
 from src.utils.model_client import build_llm
 from src.utils.parser import extract_text_smartly
+from src.utils.prompting import trim_prompt_context, estimate_context_budget
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,10 +20,12 @@ def summarize_heavy_references():
     # 모델 세팅 (저렴하고 빠른 모델 권장)
     with open("config/agents_config.yaml", "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
-    llm = build_llm(agent_name="researcher", agent_config=config.get("researcher", {}))
-    
-    # 긴 PDF를 소화하기 위한 청크 분할기 설정
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=15000, chunk_overlap=1000)
+    researcher_config = config.get("researcher", {})
+    llm = build_llm(agent_name="researcher", agent_config=researcher_config)
+
+    max_input_tokens = int(researcher_config.get("max_input_tokens", 12000))
+    chunk_size = max(4000, min(16000, estimate_context_budget(max_input_tokens, default=12000) // 2))
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=max(250, chunk_size // 12))
     
     for filename in os.listdir(raw_dir):
         if not filename.endswith(".pdf"):
@@ -50,7 +53,18 @@ def summarize_heavy_references():
             summaries = []
             for i, chunk in enumerate(chunks):
                 print(f"      - Chunk {i+1}/{len(chunks)} 요약 중...")
-                response = (prompt | llm).invoke({"text": chunk})
+                safe_chunk = trim_prompt_context(
+                    chunk,
+                    max_chars=max(3000, chunk_size * 2),
+                    required_fragments=[
+                        "규정",
+                        "예산",
+                        "기관명",
+                        "수치",
+                        "기술 사양",
+                    ],
+                )
+                response = (prompt | llm).invoke({"text": safe_chunk})
                 clean_text = extract_text_smartly(response.content)
                 summaries.append(clean_text)
                 
