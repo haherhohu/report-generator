@@ -4,23 +4,18 @@ import json
 import re
 
 from langchain_core.prompts import ChatPromptTemplate
+from src.report_types import get_required_chapter_titles, normalize_report_type
 from src.utils.file_manager import save_file_append_only, build_report_artifact_path, register_artifact
 from src.utils.model_client import build_llm
 from src.utils.parser import extract_text_smartly
 from src.utils.prompting import invoke_prompt
 
 
-REQUIRED_CHAPTER_TITLES = {
-    1: "1장 서론",
-    2: "2장 필요성",
-    3: "3장 사례 연구/분석",
-    4: "4장 전략 및 정책 제언",
-    5: "5장 수행내역(세부과제)",
-    6: "6장 추진체계/일정 및 예산",
-    7: "7장 기대효과 및 결론",
-    8: "8장 부록 (통계 및 법령 등)",
-    9: "9장 참고문헌, 약어표",
-}
+DEFAULT_REQUIRED_CHAPTER_TITLES = get_required_chapter_titles()
+
+
+def _resolve_required_chapter_titles(report_type=None, direction=None):
+    return get_required_chapter_titles(report_type=report_type, direction=direction)
 
 def _extract_sections_from_draft(markdown_text):
     """초안 마크다운에서 챕터 섹션 구조를 추출합니다."""
@@ -95,8 +90,10 @@ def _extract_chapter_body_map(markdown_text):
     return chapter_body_map
 
 
-def _normalize_sections_to_required(sections, topic, direction):
-    """초안 섹션을 1~9장 표준 구조로 정규화합니다."""
+def _normalize_sections_to_required(sections, topic, direction, report_type=None):
+    """초안 섹션을 표준 구조로 정규화합니다."""
+    required_titles = _resolve_required_chapter_titles(report_type, direction)
+    chapter_indices = sorted(required_titles)
     by_chapter = {}
     for section in sections:
         chapter_num = section.get("section_index")
@@ -104,10 +101,10 @@ def _normalize_sections_to_required(sections, topic, direction):
             by_chapter[chapter_num] = section
 
     normalized = []
-    for chapter_num in range(1, 10):
+    for chapter_num in chapter_indices:
         if chapter_num in by_chapter:
             existing = dict(by_chapter[chapter_num])
-            existing["title"] = REQUIRED_CHAPTER_TITLES.get(chapter_num, existing.get("title", f"{chapter_num}장"))
+            existing["title"] = required_titles.get(chapter_num, existing.get("title", f"{chapter_num}장"))
             existing["section_index"] = chapter_num
             existing["previous_summary"] = (existing.get("previous_summary") or "").strip()
             normalized.append(existing)
@@ -115,7 +112,7 @@ def _normalize_sections_to_required(sections, topic, direction):
 
         normalized.append(
             {
-                "title": REQUIRED_CHAPTER_TITLES[chapter_num],
+                "title": required_titles[chapter_num],
                 "section_index": chapter_num,
                 "previous_summary": (
                     f"초안에 {chapter_num}장 본문이 누락되어 기초 골격으로 추가된 장임. "
@@ -126,13 +123,14 @@ def _normalize_sections_to_required(sections, topic, direction):
     return normalized
 
 
-def _build_foundation_markdown(topic, direction, normalized_sections, chapter_body_map):
-    """기존 초안을 기반으로 1~9장 기초 보고서를 생성합니다."""
+def _build_foundation_markdown(topic, direction, normalized_sections, chapter_body_map, report_type=None):
+    """기존 초안을 기반으로 보고서 종류에 맞는 기초 보고서를 생성합니다."""
+    required_titles = _resolve_required_chapter_titles(report_type, direction)
     lines = [
         f"# {topic}",
         "",
         "## 작성 메모",
-        f"- 본 문서는 기존 초안을 기반으로 1~9장 구조를 강제 정렬한 기초 보고서임.",
+        f"- 본 문서는 기존 초안을 기반으로 {len(required_titles)}장 구조를 정렬한 기초 보고서임.",
         f"- 핵심 방향성: {direction}",
         "",
     ]
@@ -161,8 +159,9 @@ def _build_foundation_markdown(topic, direction, normalized_sections, chapter_bo
 
 
 def run_drafter(state):
-    # 초안 작성 로직    
-    print(f"  [Drafter] '{state['topic']}' 분석 및 기획 시작...")
+    # 초안 작성 로직
+    state["report_type"] = normalize_report_type(state.get("report_type"), direction=state.get("direction"))
+    print(f"  [Drafter] '{state['topic']}' 분석 및 기획 시작... (report_type={state['report_type']})")
 
     # 1. 설정 및 프롬프트 로드
     with open("config/agents_config.yaml", "r", encoding="utf-8") as f:
@@ -229,6 +228,7 @@ def run_drafter(state):
             sections,
             topic=state["topic"],
             direction=state.get("direction", ""),
+            report_type=state.get("report_type"),
         )
         
         # 5. 상태(State)에 결과 파일 경로 기록 후 반환

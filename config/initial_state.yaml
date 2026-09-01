@@ -3,6 +3,7 @@
 # direction: "4~7장 기획은 완료됨. 2~3장에 Vantis 및 노스다코타 NPUASTS 관련 최신 기술/시장/정책 동향을 조사하여 분량을 확장할 것."
 # target_perspective: "국토교통부 관점 (인프라 구축, 민간 상용화, 항로 관제 및 안전 인증 기준 중심)"
 
+report_type: "trend_analysis"
 topic: "AI, 빅데이터 등 융합 UAV 최신 기술동향 분석"
 direction:
   - 1) 기존 'UAS 분류체계'의 내용을 참조하여 기술분류체계를 구성하고, 보완할 것.

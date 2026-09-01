@@ -4,6 +4,7 @@ from typing import TypedDict, NotRequired, Any
 class ReportState(TypedDict):
     topic: str
     direction: str
+    report_type: NotRequired[str]
     target_perspective: str
     is_blank_slate: bool
     source_materials: NotRequired[list[Any]]
@@ -20,6 +21,8 @@ class ReportState(TypedDict):
     target_total_min_length: NotRequired[int]
     next_step: NotRequired[str]
     final_report_path: NotRequired[str]
+    section_final_paths: NotRequired[dict[str, str]]
+    report_final_paths: NotRequired[dict[str, str]]
     completed_sections: NotRequired[list[str]]
     artifact_history: NotRequired[list[dict[str, Any]]]
     active_version: NotRequired[str]

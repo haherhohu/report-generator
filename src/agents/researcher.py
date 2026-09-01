@@ -2,6 +2,7 @@
 import yaml
 from langchain_core.prompts import ChatPromptTemplate
 from src.utils.file_manager import save_file_append_only, build_report_artifact_path, register_artifact
+from src.utils.final_report_guard import should_reuse_or_create_final
 from src.tools.web_search import perform_hybrid_research
 from tenacity import retry, wait_exponential, stop_after_attempt
 from src.utils.model_client import build_llm
@@ -66,14 +67,58 @@ def run_researcher(state):
     # =================================================================
     # [PATCH 1] 9장을 위한 '진짜 출처' 글로벌 리스트 초기화
     # =================================================================
-    real_references = state.get("collected_references", []) 
-    
+    real_references = state.get("collected_references", [])
+    keyword_search_cache = state.setdefault("keyword_search_cache", {})
+
     for keyword in keywords:
         print(f"    - '{keyword}' 키워드 검색 중...")
-        
+
+        final_state = should_reuse_or_create_final(
+            state,
+            title=keyword,
+            related_paths=[entry.get("path") for entry in state.get("artifact_history", []) or [] if str(entry.get("title", "")).strip() == str(keyword).strip()],
+            duplicate_threshold=5,
+            summary_only=True,
+        )
+        if final_state["used_final"]:
+            state.setdefault("report_final_paths", {})[keyword] = final_state["path"]
+            state.setdefault("source_materials", []).append({
+                "filename": f"research_{keyword}_final.md",
+                "content": final_state["content"],
+                "path": final_state["path"],
+            })
+            print(f"    -> [재사용] '{keyword}' 이미 존재하는 최종본을 사용합니다. ({final_state['path']})")
+            continue
+        if final_state.get("triggered_duplicate"):
+            final_path = build_report_artifact_path(keyword, "final", base_dir="workspace/reference")
+            final_saved_path = save_file_append_only(final_path, final_state["content"])
+            register_artifact(state, artifact_type="final-report", title=f"{keyword} 최종 요약본", path=final_saved_path)
+            state.setdefault("report_final_paths", {})[keyword] = final_saved_path
+            state.setdefault("source_materials", []).append({
+                "filename": f"research_{keyword}_final.md",
+                "content": final_state["content"],
+                "path": final_saved_path,
+            })
+            print(f"    -> [최종본 생성] '{keyword}' 최종 요약본을 생성했습니다. ({final_saved_path})")
+            continue
+
         # 실제 웹 검색 수행
         search_query = f"{state['topic']} {keyword} 최신 동향"
         raw_search_results = search_with_retry(search_query)
+        previous_cache = keyword_search_cache.get(keyword)
+        keyword_search_cache[keyword] = str(raw_search_results)
+        if previous_cache == keyword_search_cache[keyword]:
+            print(f"    -> [중복 차단] '{keyword}' 검색 결과가 이전과 동일하여 최종본 재사용 경로로 전환합니다.")
+            final_path = build_report_artifact_path(keyword, "final", base_dir="workspace/reference")
+            reuse_content = should_reuse_or_create_final(state, title=keyword, related_paths=[item.get("path") for item in state.get("artifact_history", []) or [] if str(item.get("title", "")).strip() == str(keyword).strip()], duplicate_threshold=5, summary_only=True)
+            if reuse_content["used_final"]:
+                state.setdefault("report_final_paths", {})[keyword] = reuse_content["path"]
+                continue
+            if reuse_content.get("triggered_duplicate"):
+                final_saved_path = save_file_append_only(final_path, reuse_content["content"])
+                register_artifact(state, artifact_type="final-report", title=f"{keyword} 최종 요약본", path=final_saved_path)
+                state.setdefault("report_final_paths", {})[keyword] = final_saved_path
+                continue
 
         # 4. LLM을 통한 조사 내용 요약 및 분석 체인 실행
         # =================================================================
