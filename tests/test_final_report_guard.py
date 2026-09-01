@@ -1,4 +1,16 @@
+from pathlib import Path
+
+from src.utils.file_manager import save_file_append_only
 from src.utils.final_report_guard import should_reuse_or_create_final
+
+
+def test_save_file_append_only_handles_gemini_content_blocks(tmp_path):
+    gemini_like_content = [{"type": "text", "text": "## 시장 동향\n\n새로운 내용"}]
+
+    saved_path = save_file_append_only(str(tmp_path / "gemini_report.md"), gemini_like_content)
+
+    assert Path(saved_path).exists()
+    assert "## 시장 동향" in Path(saved_path).read_text(encoding="utf-8")
 
 
 def test_should_reuse_or_create_final_when_same_title_is_repeated(tmp_path):

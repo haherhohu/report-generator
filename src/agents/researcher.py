@@ -1,7 +1,7 @@
 # src/agents/researcher.py
 import yaml
 from langchain_core.prompts import ChatPromptTemplate
-from src.utils.file_manager import save_file_append_only, build_report_artifact_path, register_artifact
+from src.utils.file_manager import save_file_append_only, build_report_artifact_path, register_artifact, coerce_llm_text
 from src.utils.final_report_guard import should_reuse_or_create_final
 from src.tools.web_search import perform_hybrid_research
 from tenacity import retry, wait_exponential, stop_after_attempt
@@ -150,7 +150,7 @@ def run_researcher(state):
         # =================================================================
         # [PATCH 3] 응답 텍스트에서 '실제 참고 출처' 부분만 잘라내서 누적
         # =================================================================
-        content = response.content
+        content = coerce_llm_text(response.content)
         if "## 실제 참고 출처" in content:
             sources_part = content.split("## 실제 참고 출처")[-1].strip()
             real_references.append(f"### {keyword} 관련 출처\n{sources_part}")

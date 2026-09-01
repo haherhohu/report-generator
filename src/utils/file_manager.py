@@ -1,3 +1,4 @@
+import json
 import os
 import re
 
@@ -33,11 +34,35 @@ def next_versioned_path(path):
     return final_path
 
 
+def coerce_llm_text(value):
+    """Gemini 등 일부 모델이 반환하는 list/dict 구조를 안전한 문자열로 변환합니다."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)):
+        if all(not isinstance(item, (list, tuple, dict)) for item in value):
+            return json.dumps(list(value), ensure_ascii=False)
+        parts = [coerce_llm_text(item) for item in value]
+        return "\n\n".join(part for part in parts if part)
+    if isinstance(value, dict):
+        for key in ("text", "content", "output_text", "message", "response", "markdown", "draft", "summary"):
+            if key in value and value[key] is not None:
+                return coerce_llm_text(value[key])
+        if "parts" in value:
+            return coerce_llm_text(value["parts"])
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    return str(value)
+
+
 def save_file_append_only(path, content):
     """기존 파일 덮어쓰기를 방지하고 안전한 새 버전 경로를 생성합니다."""
+    normalized = coerce_llm_text(content)
     final_path = next_versioned_path(path)
     with open(final_path, 'x', encoding='utf-8') as f:
-        f.write(content)
+        f.write(normalized)
     return final_path
 
 
