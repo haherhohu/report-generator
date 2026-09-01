@@ -11,6 +11,7 @@ from src.utils.file_manager import (
     save_file_append_only,
     build_report_artifact_path,
     register_artifact,
+    coerce_llm_text,
 )
 from src.utils.final_report_guard import should_reuse_or_create_final, read_text_if_exists
 from src.utils.router import map_references_to_sections
@@ -170,7 +171,8 @@ async def process_single_section(section_data, global_topic, global_direction, l
         
         try:
             # JSON 배열 추출 안전장치
-            match = re.search(r'\[.*\]', toc_response.content, re.DOTALL)
+            toc_text = coerce_llm_text(toc_response.content)
+            match = re.search(r'\[.*\]', toc_text, re.DOTALL)
             if match:
                 sub_tocs = json.loads(match.group(0))
             else:
@@ -249,6 +251,9 @@ async def process_single_section(section_data, global_topic, global_direction, l
             
             # [수정] 껍데기 벗기기: 파일 저장 전 스마트 추출기로 순수 텍스트만 확보
             safe_content = extract_text_smartly(content_response.content)
+            # Gemini 등 일부 모델은 content가 리스트/블록 구조로 반환되므로, 저장 전에도 문자열로 정규화한다.
+            if not isinstance(safe_content, str):
+                safe_content = str(safe_content)
             
             # 콘텐츠 누적 (파일 저장은 루프 종료 후 한 번만 수행)
             final_full_content += f"\n\n{safe_content}"

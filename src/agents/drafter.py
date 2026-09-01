@@ -5,7 +5,7 @@ import re
 
 from langchain_core.prompts import ChatPromptTemplate
 from src.report_types import get_required_chapter_titles, normalize_report_type
-from src.utils.file_manager import save_file_append_only, build_report_artifact_path, register_artifact
+from src.utils.file_manager import save_file_append_only, build_report_artifact_path, register_artifact, coerce_llm_text
 from src.utils.model_client import build_llm
 from src.utils.parser import extract_text_smartly
 from src.utils.prompting import invoke_prompt
@@ -379,7 +379,8 @@ def run_drafter(state):
 
         # 안정적인 JSON 파싱 및 예외 처리 (환각 방지)
         try:
-            match = re.search(r'\[.*\]', response.content, re.DOTALL)
+            response_text = coerce_llm_text(response.content)
+            match = re.search(r'\[.*\]', response_text, re.DOTALL)
             state["keywords"] = json.loads(match.group(0)) if match else ["기본 키워드 폴백"]
         except Exception:
             state["keywords"] = ["관련 법령 및 규제 동향", "국내외 유사 구축 사례", "핵심 기술 요소 검증"]
