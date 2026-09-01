@@ -12,6 +12,7 @@ from src.utils.file_manager import (
     build_report_artifact_path,
     register_artifact,
 )
+from src.utils.final_report_guard import should_reuse_or_create_final, read_text_if_exists
 from src.utils.router import map_references_to_sections
 from src.utils.model_client import build_llm
 from src.utils.parser import extract_text_smartly
@@ -75,7 +76,7 @@ def _merge_expanded_sections(existing_sections, updated_sections):
     retry=retry_if_exception_type(OpenAIAPIError),
     reraise=True # 3번 모두 실패하면 최종적으로 에러를 던져 파이프라인 중단
 )
-async def process_single_section(section_data, global_topic, global_direction, llm, system_prompt, concurrency_limit):
+async def process_single_section(section_data, global_topic, global_direction, llm, system_prompt, concurrency_limit, state=None, max_context_chars=8000):
     """개별 섹션을 보강하는 비동기 함수 (Map 역할)"""
     """분할 정복(Divide & Conquer)이 적용된 개별 섹션 보강 비동기 함수"""
     async with concurrency_limit:
@@ -187,9 +188,24 @@ async def process_single_section(section_data, global_topic, global_direction, l
 
         accumulated_summary = section_data.get('previous_summary', '이전 섹션 내용 없음.')
         final_full_content = ""
+        section_final_document = ""
+        if state is not None:
+            section_final_path = state.get("section_final_paths", {}).get(section_data["title"])
+            if section_final_path:
+                section_final_document = read_text_if_exists(section_final_path)
 
         for sub_toc in sub_tocs:
             print(f"      -> [{section_data['title']}] '{sub_toc}' 파트 팽창 중...")
+            normalized_sub_toc = re.sub(r"\s+", " ", str(sub_toc)).strip()
+            if section_final_document and re.search(rf"^\s*#{{1,6}}\s*{re.escape(normalized_sub_toc)}\s*$", section_final_document, re.MULTILINE):
+                print(f"      -> [재사용] '{section_data['title']}' 섹션의 최종본에 '{sub_toc}' 하위목차가 이미 존재하여 해당 항목은 건너뜁니다.")
+                accumulated_summary += f"\n- {sub_toc} : 최종본에서 재사용됨."
+                continue
+            if re.search(rf"^\s*#{{1,6}}\s*{re.escape(normalized_sub_toc)}\s*$", final_full_content, re.MULTILINE):
+                print(f"      -> [중복 방지] '{sub_toc}' 하위목차가 이미 이번 작성 세션에서 반영되어 있어 스킵합니다.")
+                accumulated_summary += f"\n- {sub_toc} : 중복 제거로 건너뜀."
+                continue
+
             # [추가] 데이터 챕터와 일반 챕터의 프롬프트 완전 분리
             human_prompt = """
             전체 보고서 주제: {topic}
@@ -203,12 +219,19 @@ async def process_single_section(section_data, global_topic, global_direction, l
             [현재 챕터 참고 자료]
             {section_context}
             
+            [기존 최종 문서 재사용 규칙]
+            - 기존에 작성된 최종본이나 반영된 문서에 같은 제목의 하위 목차가 이미 있으면, 새로 같은 내용을 반복 작성하지 말고 기존 내용을 병합하여 중복을 제거하시오.
+            - 동일한 키워드 혹은 사실상 동일한 하위 목차가 이미 존재하면 새 섹션을 더 추가하지 말고, 기존 내용을 확장하거나 누락된 부분만 보완하시오.
+            - 최종본이 있으면 그 최종본을 우선 사용하고, 이때 중복 문단을 삭제하며 새로운 정보만 연결하시오.
+            - 분량은 늘리되, 반복/중복은 반드시 제거하고, 가장 포괄적인 내용을 유지하시오.
+            
             지시사항:
             1. 챕터를 통째로 쓰지 마십시오! 오직 지정된 세부 목차('{sub_toc}')에 대한 본문만 작성하십시오.
             2. {specific_instruction}
             3. 참고 자료의 팩트를 바탕으로 논리를 전개하되, 억지스러운 분량 팽창은 삼가십시오.
-            4. 모든 문장은 '~함', '~임'으로 끝내십시오.
-            5. 제목(세부 목차)을 마크다운(###)으로 가장 상단에 한 번만 적고 내용을 시작하십시오.
+            4. 동일 내용, 중복 문단, 유사한 주장, 반복 표현을 제거하고 가장 완성도 높은 문맥을 남기십시오.
+            5. 모든 문장은 '~함', '~임'으로 끝내십시오.
+            6. 제목(세부 목차)을 마크다운(###)으로 가장 상단에 한 번만 적고 내용을 시작하십시오.
             """
 
             content_response = await ainvoke_prompt(
@@ -235,6 +258,52 @@ async def process_single_section(section_data, global_topic, global_direction, l
 
         # 루프 종료 후 전체 콘텐츠를 한 번에 파일로 저장
         saved_path = save_file_append_only(file_path, final_full_content.strip())
+        if state is not None:
+            register_artifact(
+                state,
+                artifact_type="section-expanded",
+                title=section_data['title'],
+                path=saved_path,
+                detail=f"section_index={section_data.get('section_index', 0)}",
+            )
+
+        final_guard = should_reuse_or_create_final(
+            state or {},
+            title=section_data['title'],
+            related_paths=[saved_path],
+            duplicate_threshold=5,
+            summary_only=False,
+        )
+        if final_guard.get("used_final"):
+            state.setdefault("section_final_paths", {})[section_data['title']] = final_guard["path"]
+            print(f"    -> [재사용] '{section_data['title']}' 이미 존재하는 최종 섹션본을 사용합니다. ({final_guard['path']})")
+            return {
+                "section_id": section_data.get("section_id"),
+                "title": section_data['title'],
+                "section_index": section_data.get("section_index", 99),
+                "draft_path": final_guard["path"],
+                "content": final_guard["content"],
+            }
+        if final_guard.get("triggered_duplicate"):
+            final_path = build_report_artifact_path(global_topic, "v3_final", section_title=section_data['title'])
+            final_saved_path = save_file_append_only(final_path, final_guard["content"])
+            if state is not None:
+                register_artifact(
+                    state,
+                    artifact_type="section-final",
+                    title=f"{section_data['title']} 최종본",
+                    path=final_saved_path,
+                    detail=f"section_index={section_data.get('section_index', 0)}",
+                )
+                state.setdefault("section_final_paths", {})[section_data['title']] = final_saved_path
+            print(f"    -> [최종본 생성] '{section_data['title']}' 섹션 최종본을 생성했습니다. ({final_saved_path})")
+            return {
+                "section_id": section_data.get("section_id"),
+                "title": section_data['title'],
+                "section_index": section_data.get("section_index", 99),
+                "draft_path": final_saved_path,
+                "content": final_guard["content"],
+            }
         print(f"    -> [Expander] '{section_data['title']}' 모든 세부 목차 완료. ({saved_path})")
         
         return {
@@ -303,6 +372,8 @@ async def run_expander_async(state):
             llm,
             system_prompt,
             concurrency_limit,
+            state,
+            max_context_chars=max_context_chars,
         )
         for section in routed_sections
     ]
