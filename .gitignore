@@ -16,4 +16,5 @@ trash/
 config/initial_state.yaml
 config/nim_model_inventory.json
 memo.md
+scratch.md
 pipeline.py
