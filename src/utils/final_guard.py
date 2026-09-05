@@ -1,15 +1,18 @@
+"""Final report shield to prevent redundant LLM token consumption and infinite loops."""
+from __future__ import annotations
+
 import os
 import re
 from pathlib import Path
+from typing import Any
 
-
-def normalize_report_key(value):
+def normalize_report_key(value: Any) -> str:
     text = str(value or "").strip().lower()
     text = re.sub(r"[\s\-_]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 
 
-def get_matching_history_entries(state, *, title, include_final=True):
+def get_matching_history_entries(state: dict, *, title: str, include_final: bool = True) -> list[dict]:
     entries = []
     lookup = normalize_report_key(title)
     for entry in state.get("artifact_history", []) or []:
@@ -22,7 +25,7 @@ def get_matching_history_entries(state, *, title, include_final=True):
     return entries
 
 
-def get_final_path_for_title(state, *, title):
+def get_final_path_for_title(state: dict, *, title: str) -> str | None:
     lookup = normalize_report_key(title)
     for entry in state.get("artifact_history", []) or []:
         entry_title = entry.get("title", "")
@@ -33,7 +36,7 @@ def get_final_path_for_title(state, *, title):
     return None
 
 
-def read_text_if_exists(path):
+def read_text_if_exists(path: str | None) -> str:
     if not path:
         return ""
     try:
@@ -42,7 +45,7 @@ def read_text_if_exists(path):
         return ""
 
 
-def _dedupe_paragraphs(parts):
+def _dedupe_paragraphs(parts: list[str]) -> list[str]:
     seen = set()
     ordered = []
     for block in parts:
@@ -57,7 +60,7 @@ def _dedupe_paragraphs(parts):
     return ordered
 
 
-def build_final_bundle_document(title, paths, *, summary_only=False):
+def build_final_bundle_document(title: str, paths: list[str], *, summary_only: bool = False) -> str:
     docs = []
     for path in paths:
         content = read_text_if_exists(path)
@@ -86,34 +89,68 @@ def build_final_bundle_document(title, paths, *, summary_only=False):
                 selected.append(block)
         body = "\n\n---\n\n".join(selected[:8])
     else:
-        body = "\n\n---\n\n".join(unique_blocks[:30])
+        body = "\n\n---\n\n".join(unique_blocks[:35])
 
     return f"# {title} 최종본\n\n{body}\n"
 
 
-def should_reuse_or_create_final(state, *, title, related_paths, duplicate_threshold=5, summary_only=False):
+def should_reuse_or_create_final(
+    state: dict,
+    *,
+    title: str,
+    related_paths: list[str] | None = None,
+    duplicate_threshold: int = 5,
+    summary_only: bool = False,
+) -> dict[str, Any]:
+    """동일한 키워드/섹션이 duplicate_threshold(기본 5회) 이상 생성되었을 때 Final본을 생성하거나 기존 Final본을 재사용."""
     final_path = get_final_path_for_title(state, title=title)
     if final_path:
-        return {"path": final_path, "content": read_text_if_exists(final_path), "used_final": True}
+        return {
+            "path": final_path,
+            "content": read_text_if_exists(final_path),
+            "used_final": True,
+            "triggered_duplicate": False,
+        }
 
     matches = [
         item for item in state.get("artifact_history", []) or []
         if normalize_report_key(item.get("title", "")) == normalize_report_key(title)
     ]
     if len(matches) >= duplicate_threshold:
-        final_content = build_final_bundle_document(title, [item.get("path") for item in matches if item.get("path")], summary_only=summary_only)
-        return {"path": None, "content": final_content, "used_final": False, "triggered_duplicate": True}
+        final_content = build_final_bundle_document(
+            title,
+            [item.get("path") for item in matches if item.get("path")],
+            summary_only=summary_only,
+        )
+        return {
+            "path": None,
+            "content": final_content,
+            "used_final": False,
+            "triggered_duplicate": True,
+        }
 
     if related_paths:
         unique_paths = []
         seen = set()
-        for path in related_paths:
-            if path in seen:
-                continue
-            seen.add(path)
-            unique_paths.append(path)
+        for p in related_paths:
+            if p and p not in seen:
+                seen.add(p)
+                unique_paths.append(p)
         if len(unique_paths) >= duplicate_threshold:
-            final_content = build_final_bundle_document(title, unique_paths, summary_only=summary_only)
-            return {"path": None, "content": final_content, "used_final": False, "triggered_duplicate": True}
+            final_content = build_final_bundle_document(
+                title, unique_paths, summary_only=summary_only
+            )
+            return {
+                "path": None,
+                "content": final_content,
+                "used_final": False,
+                "triggered_duplicate": True,
+            }
 
-    return {"path": None, "content": None, "used_final": False, "triggered_duplicate": False}
+    return {
+        "path": None,
+        "content": None,
+        "used_final": False,
+        "triggered_duplicate": False,
+    }
+

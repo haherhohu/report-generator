@@ -1,0 +1,60 @@
+type_id: "market_tech_trend"
+label: "민간기관용 연구/동향조사 원고"
+default_tone: "objective_smooth"
+chapters:
+  - index: 1
+    chapter_number: "Ⅰ"
+    title: "조사 배경 및 산업·기술 정의"
+    role_type: "intro"
+    target_ratio: 0.08
+    is_core: false
+    allowed_conclusions: false
+  - index: 2
+    chapter_number: "Ⅱ"
+    title: "글로벌 시장 규모 및 산업 생태계 동향"
+    role_type: "background_trend"
+    target_ratio: 0.16
+    is_core: false
+    allowed_conclusions: false
+  - index: 3
+    chapter_number: "Ⅲ"
+    title: "최신 기술 동향 및 표준화·특허 분석"
+    role_type: "background_trend"
+    target_ratio: 0.16
+    is_core: false
+    allowed_conclusions: false
+  - index: 4
+    chapter_number: "Ⅳ"
+    title: "주요국 정책 동향 및 글로벌 투자 벤치마킹"
+    role_type: "empirical_case"
+    target_ratio: 0.14
+    is_core: false
+    allowed_conclusions: false
+  - index: 5
+    chapter_number: "Ⅴ"
+    title: "국내 현황 및 경쟁력 격차 실증 진단"
+    role_type: "empirical_case"
+    target_ratio: 0.14
+    is_core: false
+    allowed_conclusions: false
+  - index: 6
+    chapter_number: "Ⅵ"
+    title: "핵심 종합 시사점 및 미래 전망"
+    role_type: "implication"
+    target_ratio: 0.14
+    is_core: true
+    allowed_conclusions: false
+  - index: 7
+    chapter_number: "Ⅶ"
+    title: "대응 전략 및 실행 권고사항"
+    role_type: "final_conclusion"
+    target_ratio: 0.12
+    is_core: true
+    allowed_conclusions: true
+  - index: 8
+    chapter_number: "Ⅷ"
+    title: "부록 (참고문헌 및 주요 약어표)"
+    role_type: "appendix_references"
+    target_ratio: 0.06
+    is_core: false
+    allowed_conclusions: false

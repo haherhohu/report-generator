@@ -12,9 +12,15 @@ __pycache__/
 workspace/
 
 # user
+poc/
+aistudio/
 trash/
-config/initial_state.yaml
 config/nim_model_inventory.json
-memo.md
-scratch.md
 pipeline.py
+
+# 이건 그냥 개인용임
+memo.md
+# 사용자 작업내용이 들어가서 일단 빼둠
+config/initial_state.yaml
+# 이건 ai 명령 히스토리임
+scratch.md 
