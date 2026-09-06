@@ -103,11 +103,32 @@ async def _process_single_section(
         )
         specific_instruction = route_meta["specific_instruction"]
 
-        # 3. 데이터 챕터(부록)는 Sub-TOC 기획 생략하고 바로 작성
+        # 3. 데이터 챕터(부록)는 수집 데이터 기반 LLM 작성 (실패 시 안전 폴백)
         is_appendix = role_type in ("appendix_facts", "appendix_references")
         if is_appendix:
-            fallback_text = generate_fallback_section(topic, chap_num, sec_title, role_type, tone)
-            norm_content = normalize_markdown_headings(fallback_text, chap_num, sec_num, sec_title)
+            appendix_prompt = f"""
+전체 보고서 주제: {topic}
+작성 대상: {chap_num} > {sec_num} {sec_title}
+역할 유형: {role_type}
+
+[참고 데이터 풀]
+{ref_summary[:4000]}
+
+지시사항:
+1. 본 부록 절의 성격에 맞추어, 수집된 팩트 데이터와 관계 법령, 정책 실태 통계를 객관적 데이터시트 및 목록 형태로 정리하십시오.
+2. 가상의 통계나 엉뚱한 분야의 수치를 지어내지 말고, 제공된 참고 데이터와 실제 주제('{topic}')에 직접 부합하는 항목으로 작성하십시오.
+3. 마크다운 표(Table)와 불릿 리스트 형태로 정리하되, 각 표마다 세부 항목에 대한 팩트 해설을 함께 서술하십시오.
+4. 어미는 '~함', '~임'을 준수하십시오.
+"""
+            app_text = ""
+            try:
+                res_app = await client.generate_text(appendix_prompt, system_instruction=system_prompt)
+                app_text = clean_markdown_text(res_app.text)
+            except Exception as e:
+                logger.warning(f"[Expander] 부록 AI 작성 실패, 폴백 사용: {e}")
+                app_text = generate_fallback_section(topic, chap_num, sec_title, role_type, tone)
+
+            norm_content = normalize_markdown_headings(app_text, chap_num, sec_num, sec_title)
             file_path = build_report_artifact_path(topic, "v3", section_title=sec_title)
             saved_path = save_file_append_only(file_path, norm_content)
             register_artifact(state, artifact_type="section-expanded", title=sec_title, path=saved_path)
@@ -119,6 +140,7 @@ async def _process_single_section(
                 "content": norm_content,
                 "draft_path": saved_path,
             }
+
 
         # 4. Step 1: 세부 목차(Sub-TOC) 선행 기획 (기획된 핵심 토픽 및 표 기반 정밀 세분화)
         key_topics = section_data.get("key_topics", [])
@@ -204,7 +226,8 @@ async def _process_single_section(
 
 지시사항:
 1. 오직 지정된 세부 소주제('{sub_toc}')에 대한 심층 본문만 작성하십시오.
-2. 【그림 X-X】 도식화 블록(구조도+AI프롬프트+조판규격) 또는 실증 마크다운 표(Table)를 적극 삽입하십시오.
+2. 【그림 X-X】 도식화 블록(구조도+AI프롬프트+조판규격) 또는 실증 마크다운 표(Table)를 삽입하십시오.
+   - [표/도식만 덜렁 삽입 금지]: 표나 그림만 1개 넣어두고 서술을 2~3줄로 끝내는 것을 엄격히 금지합니다. 표에 들어간 항목, 수치, 비교 지표의 이유와 배경, 현황, 문제점 및 시사점을 최소 3개 이상의 상세 서술형 문단으로 풍부하게 전개하십시오.
 3. [중요] 본 절이 본문 챕터(1~N-1장)인 경우, 보고서 전체 결론을 단독으로 작성하지 마십시오.
 4. 소주제 명칭을 '### 1) {sub_toc}' 형식으로 가장 상단에 적고 본문을 서술하십시오.
 """

@@ -30,6 +30,86 @@ def _load_config() -> dict:
     return {}
 
 
+def _build_grounded_bibliography(state: ReportState, full_body_str: str) -> list[str]:
+    """
+    사용자 지침 3단계 엄격 원칙에 따른 실증 참고문헌 빌더:
+    1. 웹 검색에서 실제 수집된 레코드(verified_references)
+    2. 사용자가 직접 제공한 원시 자료 (시스템 임시 파일 research_*.md 제외)
+    3. 둘 다 없으면 허위 출처를 일체 만들지 않음
+    """
+    import re
+    from src.utils.glossary_parser import extract_in_text_citations
+
+    final_refs: list[str] = []
+    seen: set[str] = set()
+
+    seen_files: set[str] = set()
+
+    def _add(ref_str: str):
+        cleaned = re.sub(r"\s+", " ", ref_str).strip()
+        if not cleaned:
+            return
+        # 가짜/더미 출처 필터링
+        dummy_markers = (
+            "국가 공식 통계 포털",
+            "자체 분석 및 국책연구원",
+            "국가 공식 데이터베이스",
+            "공공기관 정책 백서 및 국내외 산업통계",
+        )
+        if any(marker in cleaned for marker in dummy_markers):
+            return
+
+        # 제공 기초자료 접두어 통일 및 파일명 기준 중복 차단
+        for prefix in ("제공 원시 기초자료:", "제공 기초자료:"):
+            if cleaned.startswith(prefix):
+                fname = cleaned[len(prefix):].strip()
+                cleaned = f"제공 기초자료: {fname}"
+                if fname in seen_files:
+                    return
+                seen_files.add(fname)
+                break
+
+        if cleaned not in seen:
+            seen.add(cleaned)
+            final_refs.append(cleaned)
+
+
+    # 1순위: verified_references (실제 수집된 웹 검색 레코드)
+    verified_records = state.get("verified_references", [])
+    for rec in verified_records:
+        if isinstance(rec, dict):
+            title = rec.get("title", "").strip()
+            href = rec.get("href", "").strip()
+            if title and href:
+                _add(f"{title} ({href})")
+            elif title:
+                _add(title)
+
+    # collected_references에서 실제 불릿 항목 파싱
+    for ref_group in state.get("collected_references", []):
+        for line in str(ref_group).splitlines():
+            line_s = line.strip()
+            if line_s.startswith(("- ", "* ")):
+                content = line_s[2:].strip()
+                _add(content)
+
+    # 2순위: 사용자가 직접 제공한 원시 기초자료 파일명
+    raw_sources = state.get("source_materials", [])
+    for sm in raw_sources:
+        if isinstance(sm, dict):
+            fname = sm.get("filename", "")
+            # 시스템 내부 생성 파일(research_*, _final.md) 철저 배제
+            if fname and not fname.startswith("research_") and not fname.endswith("_final.md"):
+                _add(f"제공 원시 기초자료: {fname}")
+
+    # 본문 내 인용 중 실제 URL/학술 문헌 패턴만 선별
+    for cite in extract_in_text_citations(full_body_str):
+        if any(marker in cite for marker in ("http://", "https://", "「", "vol", "doi", "issn", "법률 제")):
+            _add(cite)
+
+    return final_refs
+
+
 def run_merger(state: ReportState) -> ReportState:
     """Step 10: 전체 본문 순차 무손실 병합, 통합 참고문헌 및 총괄 영문 약어표 합성."""
     topic = state["topic"]
@@ -95,23 +175,8 @@ def run_merger(state: ReportState) -> ReportState:
 
     full_body_str = "\n".join(body_text_accumulator)
 
-    # 3. 본문 내 인용 및 실제 수집된 출처 취합
-    collected_refs = list(state.get("collected_references", []))
-    in_text_sources = extract_in_text_citations(full_body_str)
-
-    # 원본 파일명 추가
-    source_files = [
-        f"제공 원시 기초자료: {item.get('filename')}"
-        for item in state.get("source_materials", []) if isinstance(item, dict) and item.get("filename")
-    ]
-
-    combined_references: list[str] = []
-    seen_refs = set()
-    for ref_group in (collected_refs + in_text_sources + source_files):
-        cleaned_ref = str(ref_group).strip()
-        if cleaned_ref and cleaned_ref not in seen_refs:
-            seen_refs.add(cleaned_ref)
-            combined_references.append(cleaned_ref)
+    # 3. 실증 기반 참고문헌 구성 (사용자 3단계 엄격 원칙 적용)
+    grounded_references = _build_grounded_bibliography(state, full_body_str)
 
     # 4. 본문 전체에서 영문 약어(Acronym) 자동 추출
     extracted_acronyms = extract_acronyms_from_markdown(full_body_str)
@@ -126,15 +191,16 @@ def run_merger(state: ReportState) -> ReportState:
     # 참고문헌 블록
     doc_lines.append("### 1. 국내외 공식 참고문헌 및 데이터 출처 총괄 목록")
     doc_lines.append("")
-    if combined_references:
-        for idx, ref in enumerate(combined_references[:25], 1):
+    if grounded_references:
+        for idx, ref in enumerate(grounded_references[:30], 1):
             doc_lines.append(f"{idx}. {ref}")
     else:
-        doc_lines.append("1. 국가 공식 통계 포털 및 수집된 정책 실태조사 문헌 일체.")
+        doc_lines.append("※ 본 보고서는 제공된 기획 지침 및 내부 분석 프레임워크를 기반으로 작성되었으며, 별도의 외부 인용 문헌이 존재하지 않습니다.")
 
     doc_lines.append("")
     doc_lines.append("---")
     doc_lines.append("")
+
 
     # 영문 약어표 블록
     doc_lines.append("### 2. 보고서 수록 주요 영문 약어(Acronym) 및 전문용어 총괄 정의표 (Glossary)")
@@ -146,10 +212,14 @@ def run_merger(state: ReportState) -> ReportState:
         for acr in extracted_acronyms:
             doc_lines.append(f"| **{acr['acronym']}** | {acr['full_term']} | {acr['definition']} |")
     else:
-        # 기본 사전 데이터 표기
+        # 본문에서 약어가 추출되지 않은 경우 중립적인 일반 연구/산업 표준 약어만 표기
         from src.utils.glossary_parser import KNOWN_ACRONYMS
-        for k, (eng, kor) in list(KNOWN_ACRONYMS.items())[:8]:
-            doc_lines.append(f"| **{k}** | {eng} | {kor} |")
+        neutral_keys = ("TRL", "CAGR", "R&D", "M&A", "API", "IP")
+        for k in neutral_keys:
+            if k in KNOWN_ACRONYMS:
+                eng, kor = KNOWN_ACRONYMS[k]
+                doc_lines.append(f"| **{k}** | {eng} | {kor} |")
+
 
     doc_lines.append("")
 

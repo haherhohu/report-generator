@@ -49,3 +49,35 @@ def test_should_reuse_or_create_final_reusing_existing(tmp_path):
     assert res["used_final"] is True
     assert res["path"] == str(final_file)
 
+
+def test_clean_junk_reference_files(tmp_path):
+    from src.utils.final_guard import clean_junk_reference_files
+
+    ref_dir = tmp_path / "reference"
+    ref_dir.mkdir()
+    archive_dir = ref_dir / ".junk_archive"
+
+    # 정상 파일 생성
+    good_file = ref_dir / "good_research.md"
+    good_file.write_text(
+        "## 정상 조사보고서\n\n글로벌 AI 동향에 대한 구체적인 수치와 배경을 상세히 서술함.\n" * 5,
+        encoding="utf-8",
+    )
+
+    # 불량 파일 생성 (SSL 오류 문구)
+    junk_file = ref_dir / "junk_research.md"
+    junk_file.write_text(
+        "본 보고서는 조사를 시도했으나 SSL 인증 오류로 인해 데이터를 가져오지 못함.",
+        encoding="utf-8",
+    )
+
+    cleaned = clean_junk_reference_files(ref_dir, archive_dir)
+    assert len(cleaned) == 1
+    assert cleaned[0]["filename"] == "junk_research.md"
+
+    # 정상 파일은 유지되고 불량 파일은 아카이브 폴더로 이동 확인
+    assert good_file.exists()
+    assert not junk_file.exists()
+    assert (archive_dir / "junk_research.md").exists()
+
+

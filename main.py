@@ -6,6 +6,12 @@ import os
 import sys
 from pathlib import Path
 import yaml
+import certifi
+
+if "SSL_CERT_FILE" not in os.environ:
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+if "REQUESTS_CA_BUNDLE" not in os.environ:
+    os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 from src.graph.runner import PipelineRunner
 from src.tools.preprocessor import read_text_with_fallback
@@ -85,8 +91,17 @@ def main() -> None:
         default="config/pipeline_config.yaml",
         help="파이프라인 전역 설정 파일 경로",
     )
+    parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="외부 API 호출 없이 고속 Mock 엔진으로 전 파이프라인 무토큰 테스트",
+    )
 
     args = parser.parse_args()
+
+    if args.mock:
+        os.environ["MOCK_MODE"] = "true"
+        print("[시스템] ⚡ 무토큰 Mock 테스트 모드 활성화 (API 쿼터 소모 0)")
 
     print("\n=======================================================")
     print("  🚀 Report Generator: 초장문 보고서 자동 생성 파이프라인")
@@ -102,12 +117,34 @@ def main() -> None:
     else:
         print(f"[시스템] 세션 '{args.thread_id}' 재개 모드 가동\n")
 
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
     runner = PipelineRunner(args.pipeline_config)
 
+    node_descriptions = {
+        "drafter": "초안 및 마스터 아웃라인 기획",
+        "researcher": "키워드별 심층 웹·정책 자료조사",
+        "expander": "섹션별 Sub-TOC 분할 및 본문 3단계 심층 확장",
+        "reviewer": "공공 보고서 서식 및 8대 품질 규정 검증",
+        "gatekeeper": "코어 70% 방어선 및 실증 분량 심사",
+        "merger": "최종 마크다운 병합 및 통합 참고문헌/약어표 생성",
+    }
+
     def on_progress(node_name: str, node_state: dict):
-        print(f"  [✓] 노드 완료: {node_name}")
+        desc = node_descriptions.get(node_name, "")
+        print(f"\n✅ [단계 완료] {node_name.upper()} ({desc})", flush=True)
+        if node_name == "gatekeeper":
+            decision = node_state.get("gatekeeper_decision", "UNKNOWN")
+            loop_count = node_state.get("loop_count", 0)
+            chars = node_state.get("current_chars", 0)
+            print(f"   ↳ 심사 판정: {decision} (현재 분량: {chars:,}자, 루프 회차: {loop_count}회)", flush=True)
         if node_name == "merger" and node_state.get("final_report_path"):
-            print(f"\n🎉 [최종 완성] 보고서 저장 완료: {node_state['final_report_path']}")
+            print(f"\n🎉 [최종 완성] 보고서 저장 완료: {node_state['final_report_path']}\n", flush=True)
 
     try:
         final_state = runner.run(

@@ -1,14 +1,16 @@
 # 에이전트별 모델 및 파라미터 구성
-# 기본 제공자(Default Provider): gemini
-# 대체 제공자(Fallback Provider): nvidia_nim / openai_compatible
+# 기본 제공자(Default Provider): nvidia_nim
+# 대체 제공자(Fallback Provider): gemini / openai_compatible
 
 drafter:
-  provider: "gemini"
-  model: "gemini-2.5-flash"
-  api_key_env: "GEMINI_API_KEY"
+  provider: "nvidia_nim"
+  model: "nvidia/nemotron-3.5-lightning-30b-a3b"
+  api_key_env: "NIM_API_KEY"
+  base_url: "https://integrate.api.nvidia.com/v1"
   fallback_models:
-    - "gemini-2.5-flash-lite"
-    - "nvidia/nemotron-3.5-lightning-30b-a3b"
+    - "nvidia/llama-3.1-nemotron-70b-instruct"
+    - "google/gemma-4-31b-it"
+    - "gemini-2.5-flash"
   max_input_tokens: 32768
   max_output_tokens: 8192
   max_retries: 2
@@ -16,13 +18,14 @@ drafter:
   temperature: 0.2
 
 researcher:
-  provider: "gemini"
-  model: "gemini-2.5-flash-lite"
-  api_key_env: "GEMINI_API_KEY"
+  provider: "nvidia_nim"
+  model: "nvidia/nemotron-3.5-lightning-30b-a3b"
+  api_key_env: "NIM_API_KEY"
+  base_url: "https://integrate.api.nvidia.com/v1"
   fallback_models:
-    - "gemini-2.5-flash"
+    - "nvidia/llama-3.1-nemotron-70b-instruct"
     - "google/gemma-4-31b-it"
-    - "nvidia/nemotron-3.5-lightning-30b-a3b"
+    - "gemini-2.5-flash-lite"
   max_input_tokens: 32768
   max_output_tokens: 8192
   max_retries: 3
@@ -30,13 +33,16 @@ researcher:
   temperature: 0.2
 
 expander:
-  provider: "gemini"
-  model: "gemini-2.5-flash"
-  api_key_env: "GEMINI_API_KEY"
+  provider: "nvidia_nim"
+  model: "nvidia/llama-3.1-nemotron-70b-instruct"
+  api_key_env: "NIM_API_KEY"
+  base_url: "https://integrate.api.nvidia.com/v1"
   fallback_models:
-    - "gemini-2.5-flash-lite"
+    - "nvidia/nemotron-3-ultra-550b-a55b"
+    - "nvidia/nemotron-3.5-lightning-30b-a3b"
     - "nvidia/nemotron-3-super-120b-a12b"
     - "openai/gpt-oss-120b"
+    - "gemini-2.5-flash"
   max_input_tokens: 32768
   max_output_tokens: 8192
   max_retries: 2
@@ -44,12 +50,13 @@ expander:
   temperature: 0.3
 
 reviewer:
-  provider: "gemini"
-  model: "gemini-2.5-flash"
-  api_key_env: "GEMINI_API_KEY"
+  provider: "nvidia_nim"
+  model: "nvidia/nemotron-3.5-lightning-30b-a3b"
+  api_key_env: "NIM_API_KEY"
+  base_url: "https://integrate.api.nvidia.com/v1"
   fallback_models:
-    - "gemini-2.5-flash-lite"
-    - "nvidia/nemotron-3.5-lightning-30b-a3b"
+    - "nvidia/llama-3.1-nemotron-70b-instruct"
+    - "gemini-2.5-flash"
   max_input_tokens: 32768
   max_output_tokens: 8192
   max_retries: 2
@@ -57,11 +64,13 @@ reviewer:
   temperature: 0.2
 
 gatekeeper:
-  provider: "gemini"
-  model: "gemini-2.5-flash-lite"
-  api_key_env: "GEMINI_API_KEY"
+  provider: "nvidia_nim"
+  model: "nvidia/nemotron-3.5-lightning-30b-a3b"
+  api_key_env: "NIM_API_KEY"
+  base_url: "https://integrate.api.nvidia.com/v1"
   fallback_models:
-    - "gemini-2.5-flash"
+    - "nvidia/llama-3.1-nemotron-70b-instruct"
+    - "gemini-2.5-flash-lite"
   max_input_tokens: 16384
   max_output_tokens: 4096
   max_retries: 2
@@ -69,11 +78,13 @@ gatekeeper:
   temperature: 0.1
 
 merger:
-  provider: "gemini"
-  model: "gemini-2.5-flash-lite"
-  api_key_env: "GEMINI_API_KEY"
+  provider: "nvidia_nim"
+  model: "nvidia/nemotron-3.5-lightning-30b-a3b"
+  api_key_env: "NIM_API_KEY"
+  base_url: "https://integrate.api.nvidia.com/v1"
   fallback_models:
-    - "gemini-2.5-flash"
+    - "nvidia/llama-3.1-nemotron-70b-instruct"
+    - "gemini-2.5-flash-lite"
   max_input_tokens: 32768
   max_output_tokens: 8192
   max_retries: 2

@@ -45,18 +45,18 @@ def generate_fallback_section(
         body_topic = f"종합 결론 및 정책 제언"
         sub_focus = f"보고서 전반의 연구 성과를 총괄 요약하고 정부 및 정책 입안자가 즉각 채택할 수 있는 정책 권고사항을 제안{verb_suffix}."
     elif role_type in ("appendix_facts", "appendix_references"):
-        return f"""### 1. 관련 공식 통계 데이터시트
+        return f"""### 1. 『{topic}』 관련 분석 지표 체계 및 조사 프레임워크
 
-| 연번 | 조사 구분 | 주요 지표명 | 기준연도 | 수치/통계 | 공식 출처 |
-| :---: | :--- | :--- | :---: | :---: | :--- |
-| 1 | 시장 규모 | 글로벌 시장 총매출 | 2024 | 약 1,280억 달러 | 글로벌 산업통계 DB |
-| 2 | 기술 수준 | 최고 선도국 대비 기술격차 | 2024 | 1.8년 (87.5%) | 국책 기술수준평가서 |
-| 3 | 인프라 | 국내 실증 테스트베드 지정 수 | 2024 | 총 14개소 | 주관 부처 고시 |
-※ 자료: 국가 공식 통계 DB 및 국책연구기관 실태조사 취합
+본 부록에서는 『{topic}』과 관련하여 본문에서 분석된 주요 정책 및 기술적 평가 항목을 총괄 정리함.
 
-### 2. 주요 관계 법령 및 규정 발췌
-- **국가연구개발혁신법 제9조**: 대형 융합 연구개발과제의 산학연 협력 생태계 조성 근거.
-- **산업기술혁신촉진법 제11조**: 첨단 전략기술 분야 실증 인프라 구축 및 규제 샌드박스 연계.
+가. 주요 실증 점검 항목
+- 기술성숙도(TRL) 단계별 목표치 및 선진국 대비 상대적 역량 격차 진단
+- 산업 생태계 내 핵심 참여 주체별(산·학·연·관) 역할 분담 및 추진 거버넌스
+- 단계별 R&D 및 제도적 지원 체계의 실효성 모니터링 지표
+
+나. 향후 후속 데이터베이스 연계 방안
+- 실시간 통계 포털 및 정부 고시 개정 사항의 주기적 반영
+- 핵심 성과지표(KPI) 달성도 평가를 위한 정량적 실태조사 연계
 """
     else:
         body_topic = f"{section_title} 심층 분석"
@@ -104,24 +104,18 @@ def generate_fallback_citations_glossary(
         for idx, ref in enumerate(collected_references, 1):
             refs_lines.append(f"{idx}. {ref}")
     else:
+        # 외부 수집 자료가 없을 때는 절대 가짜 출처를 날조하지 않고 사실을 명시
         refs_lines = [
-            "1. 과학기술정보통신부·한국과학기술기획평가원(KISTEP), 「국가전략기술 기술수준평가 보고서」, 2024.",
-            "2. 산업연구원(KIET), 「첨단 전략산업의 글로벌 공급망 재편과 국내 대응방안」, 2024.",
-            "3. 국토교통부, 「무인항공기(UAV/UAS) 산업 생태계 활성화 및 인프라 로드맵」, 2024.",
-            "4. IEEE / AIAA, International Standards and Guidelines for Unmanned Systems and Autonomy, 2023.",
-            "5. Federal Aviation Administration (FAA), Integration of Civil Unmanned Aircraft Systems, 2024.",
+            "※ 본 보고서는 제공된 기획 지침 및 내부 분석 프레임워크를 기반으로 작성되었으며, 별도의 외부 인용 문헌이 존재하지 않습니다."
         ]
 
     glossary_table = """| 영문 약어 (Acronym) | 영문 원어 (Full Term) | 한글 표준 공식 명칭 및 핵심 정의 |
 | :--- | :--- | :--- |
-| **UAV** | Unmanned Aerial Vehicle | 무인항공기: 조종사가 탑승하지 않고 자율 또는 원격 조종되는 비행체 |
-| **UAS** | Unmanned Aircraft System | 무인항공시스템: 기체, 통제소(GCS), 통신 데이터링크(C2)를 포괄하는 총체적 시스템 |
-| **C2** | Command and Control | 지휘통제/명령제어: 비행체의 원격 조종 및 관제를 위한 핵심 통신 네트워크 |
 | **TRL** | Technology Readiness Level | 기술성숙도: 원천 기초연구(1단계)부터 사업화 양산(9단계)까지의 성숙도 척도 |
 | **CAGR** | Compound Annual Growth Rate | 연평균 복합 성장률: 특정 기간 동안의 지속적인 연평균 시장 성장 지표 |
-| **FAA** | Federal Aviation Administration | 미국 연방항공청: 미국의 민간 항공 및 공역 안전을 총괄하는 규제 기관 |
-| **BVLOS** | Beyond Visual Line of Sight | 가시권 밖 비행: 조종사의 육안 관측 범위를 벗어난 장거리 원격 자율 비행 |
-| **GCS** | Ground Control Station | 지상통제소: 비행체의 실시간 텔레메트리 모니터링 및 임무 제어를 수행하는 지상 관제 시스템 |
+| **R&D** | Research and Development | 연구개발: 과학기술 지식을 축적하고 새로운 응용을 창출하는 창의적 활동 |
+| **KPI** | Key Performance Indicator | 핵심성과지표: 전략 목표 달성을 정량적으로 평가하기 위한 핵심 척도 |
+| **M&A** | Mergers and Acquisitions | 기업 인수합병: 기업 간 통합 및 경영권 인수를 통한 외연 확장 |
 """
 
     return f"""## 1. 국내외 공식 참고문헌 및 데이터 출처 총괄 목록
@@ -134,4 +128,5 @@ def generate_fallback_citations_glossary(
 
 {glossary_table}
 """
+
 
