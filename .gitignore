@@ -21,6 +21,7 @@ pipeline.py
 # 이건 그냥 개인용임
 memo.md
 # 사용자 작업내용이 들어가서 일단 빼둠
+works/
 config/initial_state.yaml
 # 이건 ai 명령 히스토리임
 scratch.md 

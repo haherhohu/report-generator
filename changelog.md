@@ -3,6 +3,26 @@
 All notable changes to the **Report Generator** project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [v2.1.1] - 2026-09-08
+
+### 🚀 Added
+
+- **다중 과제 작업 의뢰 스펙 체계화 (`works/*.yaml`, `report_list.md`)**:
+  - `works/` 디렉터리 내 개별 보고서 의뢰 설정 파일(`report_type`, `topic`, `direction`, `target_perspective`, `tone`, `target_pages`, `target_chars`) 규격화.
+  - `main.py`의 `--state-file` 인자를 통한 과제별 분기 실행 및 독립 세션(`--thread-id`) 지원.
+  - 전체 과제 진행 현황 및 납기/명의자 관리를 위한 `report_list.md` 연동 지원.
+- **문서 접근성 동기화 (`changelogs.md`)**:
+  - `changelog.md`와 `changelogs.md` 간 심볼릭 링크를 구성하여 단일 원본 기반의 파일명 호환성 보장.
+
+### 🔄 Changed
+
+- **조사보고서 실질 서술 분량 측정 정교화 (`src/utils/final_guard.py`)**:
+  - `is_valid_quality_content`의 서술형 텍스트 길이 측정 시, 마크다운 불릿(`*`, `-`, `>`) 및 번호형 글머리 기호의 선행 기호만 정규식(`^[\*\-\>\d\.\s]+`)으로 정제하고 실제 서술 텍스트는 정상 분량으로 온전히 산정하도록 개선 (유효 불릿형 보고서의 오탐 탈락 방지).
+- **macOS 유니코드 NFD/NFC 정규화 대응**:
+  - macOS 환경에서 자모 분리(NFD) 방식으로 저장된 레퍼런스 파일명을 표준 NFC로 자동 정규화(`unicodedata.normalize('NFC', ...)`)하여 `.junk_archive/` 격리 및 참조 시 파일 탐색 누락 방지.
+- **파이프라인 가이드라인 전면 개정 (`guideline.md`)**:
+  - 다중 과제 명세서(`works/*.yaml`) 작성 및 CLI 실행 가이드, 3대 실증 출처 원칙, 조사보고서 품질 게이트 및 `.junk_archive/` 격리 기준 상세 반영.
+
 ## [v2.1.0] - 2026-09-06
 
 ### 🚀 Added
@@ -18,6 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     1. **1순위 (실제 수집된 웹 검색 자료)**: `state["verified_references"]`의 실제 URL 및 검증된 출처명 우선 등재.
     2. **2순위 (사용자 제공 원시자료)**: 웹 검색 부재 시 사용자가 직접 제공한 원본 파일명만 `제공 기초자료: [파일명]` 형태로 등재 (시스템 내부 생성 `research_*.md` 임시 파일은 철저히 배제).
     3. **3순위 (모든 자료 부재 시)**: 허위 출처를 일체 날조하지 않고 "별도 외부 참고문헌 없음"으로 투명하게 고지.
+    4. **3순위 (모든 자료 부재 시)**: 허위 출처를 일체 날조하지 않고 "별도의 외부 인용 문헌이 존재하지 않습니다"로 투명하게 고지.
 - **신규 단위 테스트 2종 추가**:
   - `tests/test_researcher_quality.py`: 표만 덜렁 있는 단편 감지, 불량품 Final 박제 방지, 검색 실패 시 사용자 제공 자료 연계 검증.
   - `tests/test_grounded_references.py`: 3단계 참고문헌 엄격 원칙 및 허위 출처(무인항공기 등) 생성 방지 검증.
