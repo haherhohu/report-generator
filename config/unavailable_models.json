@@ -1,0 +1,18 @@
+{
+  "nvidia_nim": {
+    "models": [
+      "google/gemma-4-31b-it",
+      "meta/llama-3.1-70b-instruct",
+      "nvidia/llama-3.1-nemotron-70b-instruct"
+    ],
+    "reason": "Known deprecated or unavailable model entries; confirmed runtime failures should keep this list updated.",
+    "updated_at": "2026-09-12T00:00:00+00:00"
+  },
+  "gemini": {
+    "models": [
+      "gemini-2.5-flash-lite"
+    ],
+    "reason": "Availability varies by Gemini account; runtime 400/API_KEY_INVALID failures are added here.",
+    "updated_at": "2026-09-12T00:00:00+00:00"
+  }
+}

@@ -8,7 +8,7 @@ from src.report_types import get_required_chapter_titles, normalize_report_type
 from src.utils.file_manager import save_file_append_only, build_report_artifact_path, register_artifact, coerce_llm_text
 from src.utils.model_client import build_llm
 from src.utils.parser import extract_text_smartly
-from src.utils.prompting import invoke_prompt
+from src.utils.prompting import invoke_prompt, invoke_chain
 
 
 DEFAULT_REQUIRED_CHAPTER_TITLES = get_required_chapter_titles()
@@ -193,7 +193,11 @@ def run_drafter(state):
         ])
         
         # 3. 프롬프트 체인 구성 및 실행    
-        response = (prompt | llm).invoke({"topic": state["topic"], "direction": state["direction"]})
+        response = invoke_chain(
+            prompt | llm,
+            llm,
+            {"topic": state["topic"], "direction": state["direction"]},
+        )
         
         # 스마트 텍스트 추출기 통과
         draft_content = extract_text_smartly(response.content)
@@ -265,7 +269,7 @@ def run_drafter(state):
             ("human", "보고서 주제: {topic}\n요구 방향성: {direction}\n\n[제공된 기초 자료]\n{draft_content}")
         ])
                 
-        redraft_response = (redraft_prompt | llm).invoke({
+        redraft_response = invoke_chain(redraft_prompt | llm, llm, {
             "topic": state["topic"], 
             "direction": state["direction"],
             "draft_content": safe_draft_content
@@ -288,7 +292,7 @@ def run_drafter(state):
             ("human", "보고서 주제: {topic}\n요구 방향성: {direction}")
         ])
 
-        v1_response = (v1_prompt | llm).invoke({"topic": state["topic"], "direction": state["direction"]})
+        v1_response = invoke_chain(v1_prompt | llm, llm, {"topic": state["topic"], "direction": state["direction"]})
         draft_v1_content = extract_text_smartly(v1_response.content)
         
         v1_path = build_report_artifact_path(state['topic'], "v1")
@@ -315,7 +319,7 @@ def run_drafter(state):
                 ("human", "보고서 주제: {topic}\n\n[기초 초안 v1]\n{v1_content}\n\n[사용자 기초 자료]\n{source_content}")
             ])
             
-            v2_response = (v2_prompt | llm).invoke({
+            v2_response = invoke_chain(v2_prompt | llm, llm, {
                 "topic": state["topic"], 
                 "v1_content": draft_v1_content, 
                 "source_content": safe_source_content
@@ -371,7 +375,7 @@ def run_drafter(state):
         ])            
 
         # 3. 프롬프트 체인 구성 및 실행    
-        response = (prompt | llm).invoke({
+        response = invoke_chain(prompt | llm, llm, {
             "direction": state["direction"],
             "target_perspective": state.get("target_perspective", "일반"),
             "draft_content": target_draft_content

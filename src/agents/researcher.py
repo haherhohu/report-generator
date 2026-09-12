@@ -5,14 +5,18 @@ from src.utils.file_manager import save_file_append_only, build_report_artifact_
 from src.utils.final_report_guard import should_reuse_or_create_final
 from src.tools.web_search import perform_hybrid_research
 from tenacity import retry, wait_exponential, stop_after_attempt
-from src.utils.model_client import build_llm
+from src.utils.model_client import build_llm, record_model_failure, throttle_model_call
 
 # API 셧다운 방지를 위한 지수 백오프 재시도 데코레이터 (최대 3회, 대기시간 점진적 증가)
 @retry(wait=wait_exponential(multiplier=2, min=2, max=10), stop=stop_after_attempt(3))
 def invoke_llm_with_retry(chain, inputs):
     try:
+        llm_step = chain.last if hasattr(chain, 'last') else chain
+        throttle_model_call(llm_step, inputs)
         return chain.invoke(inputs)
     except Exception as e:
+        llm_step = chain.last if hasattr(chain, 'last') else chain
+        record_model_failure(llm_step, e)
         print("\n================ [에러 추적 리포트] ================")
         print(f"1. 에러 원문: {str(e)}")
         

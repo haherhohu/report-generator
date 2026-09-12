@@ -7,15 +7,16 @@
 drafter: # 얘는 진짜 초안용
   #provider: "gemini" # openai_compatible | nvidia_nim | gemini
   #model: "gemini-3.5-flash-lite" # 저비용: 목차/초안 뼈대 작성
-  #api_key_env: "GEMINI_API_KEY"
   provider: "nvidia_nim"
   model: "google/gemma-4-31b-it"
   fallback_models:
-    - "nvidia/nemotron-3.5-lightning-30b-a3b"
-    - "nvidia/nemotron-3-super-120b-a12b"
-    - "openai/gpt-oss-20b"
+    - provider: "nvidia_nim"
+      model: "nvidia/nemotron-3.5-lightning-30b-a3b"
+    - provider: "nvidia_nim"
+      model: "nvidia/nemotron-3-super-120b-a12b"
+    - provider: "nvidia_nim"
+      model: "openai/gpt-oss-20b"
   base_url: "https://integrate.api.nvidia.com/v1"
-  api_key_env: "NIM_API_KEY"
   max_input_tokens: 8000
   max_output_tokens: 4096
   max_retries: 2
@@ -24,15 +25,14 @@ drafter: # 얘는 진짜 초안용
 researcher: # 저비용: 다회 호출 조사/요약 모델임
   #provider: "gemini" # openai_compatible | nvidia_nim | gemini
   #model: "gemini-3.1-flash-lite" # 저비용: 목차/초안 뼈대 작성
-  #api_key_env: "GEMINI_API_KEY"
   provider: "nvidia_nim"
   model: "nvidia/nemotron-3.5-lightning-30b-a3b"
   fallback_models:
-    - "google/gemma-4-31b-it"
-    - "meta/llama-3.1-70b-instruct"
-    - "openai/gpt-oss-20b"
+    - provider: "nvidia_nim"
+      model: "meta/llama-3.1-70b-instruct"
+    - provider: "nvidia_nim"
+      model: "openai/gpt-oss-20b"
   base_url: "https://integrate.api.nvidia.com/v1"
-  api_key_env: "NIM_API_KEY"
   max_input_tokens: 12000
   max_output_tokens: 4096
   max_retries: 3
@@ -41,16 +41,15 @@ researcher: # 저비용: 다회 호출 조사/요약 모델임
 expander: # 고비용: 논리적으로 추론해야 함
   #provider: "gemini"
   #model: "gemini-3.5-flash" # 품질/비용 균형: 본문 확장
-  #api_key_env: "GEMINI_API_KEY"
   provider: "nvidia_nim"
   # model: "nvidia/nemotron-3-ultra-550b-a55b" # 503/504에 취약하므로 운영 시 사용을 제한
   model: "nvidia/nemotron-3-super-120b-a12b"
   fallback_models:
-    - "nvidia/nemotron-3.5-lightning-30b-a3b"
-    - "google/gemma-4-31b-it"
-    - "openai/gpt-oss-20b"
+    - provider: "nvidia_nim"
+      model: "nvidia/nemotron-3.5-lightning-30b-a3b"
+    - provider: "nvidia_nim"
+      model: "openai/gpt-oss-20b"
   base_url: "https://integrate.api.nvidia.com/v1"
-  api_key_env: "NIM_API_KEY"
   max_input_tokens: 16000
   max_output_tokens: 8192
   max_retries: 1
@@ -59,6 +58,11 @@ expander: # 고비용: 논리적으로 추론해야 함
     reasoning_budget: 16384
 
 # gemini
+# Gemini 계정별 실제 한도에 맞춰 아래 값을 조정합니다. 설정값은 호출 전 예약되므로
+# 입력 토큰과 max_output_tokens를 합산한 최악의 사용량도 한도를 넘지 않습니다.
+# rate_limits:
+#   requests_per_minute: 5
+#   tokens_per_minute: 20000
 # 사용 가능한 모델:
 #   'deep-research-max-preview-04-2026', # 실제로는 사용불가
 #   'deep-research-preview-04-2026', # 실제로는 사용불가
@@ -75,8 +79,7 @@ expander: # 고비용: 논리적으로 추론해야 함
 #   'nvidia/nemotron-3-super-120b-a12b' # 550 아래 체급
 #   'nvidia/nemotron-3-nano-30b-a3b' # 나노체급인듯
 #   'meta/llama-3.3-70B-instruct' # 경량이라는데 안 뜬다?
-#   'meta/llama-3.1-70B-instruct' # deprecated
+#   'nvidia/llama-3.1-nemotron-70b-instruct' # deprecated/unavailable
 #   'mistral/mistral-nemotron'
-#   'google/gemma-4-31b-it'
 #   'openai/gpt-oss-20b' # gpt
 #   'openai/gpt-oss-120b' # gpt

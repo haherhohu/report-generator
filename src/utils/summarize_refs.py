@@ -5,7 +5,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.prompts import ChatPromptTemplate
 from src.utils.model_client import build_llm
 from src.utils.parser import extract_text_smartly
-from src.utils.prompting import trim_prompt_context, estimate_context_budget
+from src.utils.prompting import trim_prompt_context, estimate_context_budget, invoke_chain
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -64,7 +64,7 @@ def summarize_heavy_references():
                         "기술 사양",
                     ],
                 )
-                response = (prompt | llm).invoke({"text": safe_chunk})
+                response = invoke_chain(prompt | llm, llm, {"text": safe_chunk})
                 clean_text = extract_text_smartly(response.content)
                 summaries.append(clean_text)
                 

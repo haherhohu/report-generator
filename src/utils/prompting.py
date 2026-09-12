@@ -3,6 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
+from src.utils.model_client import (
+    async_throttle_model_call,
+    record_model_failure,
+    throttle_model_call,
+)
 
 
 def estimate_context_budget(max_input_tokens: int | str | None, default: int = 8000) -> int:
@@ -58,7 +63,12 @@ def invoke_prompt(llm, system_prompt: str | None, human_template: str, **kwargs:
         messages.append(("system", system_prompt))
     messages.append(("human", human_template))
     prompt = ChatPromptTemplate.from_messages(messages)
-    return (prompt | llm).invoke(kwargs)
+    try:
+        throttle_model_call(llm, kwargs)
+        return (prompt | llm).invoke(kwargs)
+    except Exception as exc:
+        record_model_failure(llm, exc)
+        raise
 
 
 async def ainvoke_prompt(llm, system_prompt: str | None, human_template: str, **kwargs: Any):
@@ -68,4 +78,19 @@ async def ainvoke_prompt(llm, system_prompt: str | None, human_template: str, **
         messages.append(("system", system_prompt))
     messages.append(("human", human_template))
     prompt = ChatPromptTemplate.from_messages(messages)
-    return await (prompt | llm).ainvoke(kwargs)
+    try:
+        await async_throttle_model_call(llm, kwargs)
+        return await (prompt | llm).ainvoke(kwargs)
+    except Exception as exc:
+        record_model_failure(llm, exc)
+        raise
+
+
+def invoke_chain(chain, llm, inputs: dict[str, Any]):
+    """이미 조립된 체인도 동일한 모델 오류 기록 경로를 사용합니다."""
+    try:
+        throttle_model_call(llm, inputs)
+        return chain.invoke(inputs)
+    except Exception as exc:
+        record_model_failure(llm, exc)
+        raise
