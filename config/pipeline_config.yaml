@@ -1,5 +1,7 @@
-# 파이프라인 전역 설정
-max_loops: 2
-max_concurrency: 5
-target_6_min_length: 3000
-target_total_min_length: 200000
+# 파이프라인 전역 실행 설정
+max_loops: 2 # Gatekeeper 최대 회귀 팽창 루프 횟수 (Hard Limit)
+max_concurrency: 4 # Expander 비동기 섹션 병렬 처리 최대 동시성 (API Rate Limit 방어)
+target_core_min_length: 3000 # 코어 전략 장(단일 절당) 기준 분량 (자)
+target_total_min_length: 200000 # 전체 최종 보고서 목표 최소 분량 (자) (30p: 40,000자 / 200p: 250,000자)
+max_duplicate_threshold: 5 # 동일 키워드/섹션 중복 생성 시 Final 강제 고정 임계치
+checkpoint_db_path: "workspace/checkpoints/report_pipeline.sqlite"

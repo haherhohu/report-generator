@@ -1,6 +1,9 @@
-# src/agents/drafter.py
-import yaml
+"""Drafter Agent: Creates report master outline (v1/v2) and extracts research keywords."""
+from __future__ import annotations
+
 import json
+import logging
+import os
 import re
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -171,15 +174,8 @@ def run_drafter(state):
         
     # config에 지정된 모델 호출 (기본값 설정 포함)
     drafter_config = config.get("drafter", {})
-    model_name = drafter_config.get("model", "gpt-4o-mini")
-
-    # 2. LLM 인스턴스화: provider별 키/엔드포인트 설정 적용
-    llm = build_llm(
-        agent_name="drafter",
-        agent_config=drafter_config,
-        default_model=model_name,
-        temperature=0.2,
-    )
+    client = UnifiedModelClient("drafter", drafter_config)
+    system_prompt = _load_prompt()
 
     # [A] 백지 모드: 초안이 없을 때 전체 뼈대 작성
     if state.get("is_blank_slate"):

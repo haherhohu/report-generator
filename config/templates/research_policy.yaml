@@ -1,0 +1,67 @@
+type_id: "research_policy"
+label: "정부제출용 연구기관 보고서"
+default_tone: "official_formal"
+chapters:
+  - index: 1
+    chapter_number: "Ⅰ"
+    title: "서론 및 추진 필요성"
+    role_type: "intro"
+    target_ratio: 0.05
+    is_core: false
+    allowed_conclusions: false
+  - index: 2
+    chapter_number: "Ⅱ"
+    title: "국내외 환경변화 및 기술·산업 동향 분석"
+    role_type: "background_trend"
+    target_ratio: 0.15
+    is_core: false
+    allowed_conclusions: false
+  - index: 3
+    chapter_number: "Ⅲ"
+    title: "국내 실증 현황 진단 및 한계·문제점 도출"
+    role_type: "empirical_case"
+    target_ratio: 0.20
+    is_core: false
+    allowed_conclusions: false
+  - index: 4
+    chapter_number: "Ⅳ"
+    title: "비전, 추진목표 및 전략적 추진체계(거버넌스)"
+    role_type: "core_strategy"
+    target_ratio: 0.15
+    is_core: true
+    allowed_conclusions: false
+  - index: 5
+    chapter_number: "Ⅴ"
+    title: "중점 추진전략별 세부수행과제(Action Plans) 기획"
+    role_type: "action_plans"
+    target_ratio: 0.20
+    is_core: true
+    allowed_conclusions: false
+  - index: 6
+    chapter_number: "Ⅵ"
+    title: "단계별·연도별 추진 로드맵 및 재정 투자 계획"
+    role_type: "roadmap"
+    target_ratio: 0.05
+    is_core: true
+    allowed_conclusions: false
+  - index: 7
+    chapter_number: "Ⅶ"
+    title: "종합 결론 및 정책적 제언 (기대효과 포함)"
+    role_type: "final_conclusion"
+    target_ratio: 0.10
+    is_core: false
+    allowed_conclusions: true
+  - index: 8
+    chapter_number: "Ⅷ"
+    title: "부록 (통계 및 관계 법령 발췌)"
+    role_type: "appendix_facts"
+    target_ratio: 0.08
+    is_core: false
+    allowed_conclusions: false
+  - index: 9
+    chapter_number: "Ⅸ"
+    title: "참고문헌 및 주요 약어표"
+    role_type: "appendix_references"
+    target_ratio: 0.02
+    is_core: false
+    allowed_conclusions: false
