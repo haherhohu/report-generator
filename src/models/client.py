@@ -1,11 +1,13 @@
-"""Unified AI Model Client supporting Gemini and NVIDIA NIM/OpenAI with resilient fallbacks."""
+"""Unified AI Model Client supporting Gemini and NVIDIA NIM/OpenAI with resilient fallbacks and unavailable models filtering."""
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import json
 import logging
 import os
 import random
+import threading
 import time
 from typing import Any, Mapping, Literal
 import certifi
@@ -19,6 +21,138 @@ if "REQUESTS_CA_BUNDLE" not in os.environ:
     os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 logger = logging.getLogger("report_generator.models")
+
+UNAVAILABLE_MODEL_PATH = os.path.join("config", "unavailable_models.json")
+
+
+def load_unavailable_models() -> dict[str, set[str]]:
+    """이전 실행에서 실제 호출 실패한 모델 목록을 읽습니다."""
+    if not os.path.exists(UNAVAILABLE_MODEL_PATH):
+        return {}
+    try:
+        with open(UNAVAILABLE_MODEL_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        result: dict[str, set[str]] = {}
+        for provider, value in (payload or {}).items():
+            models = value.get("models", []) if isinstance(value, dict) else value
+            if isinstance(models, list):
+                result[str(provider)] = {str(model) for model in models}
+        return result
+    except Exception as e:
+        logger.warning(f"unavailable_models.json 로드 실패: {e}")
+        return {}
+
+
+def persist_unavailable_model(provider: str, model: str, reason: str) -> None:
+    """실제 호출에 실패한 모델을 다음 실행에서도 제외하도록 기록합니다."""
+    unavailable = load_unavailable_models()
+    unavailable.setdefault(provider, set()).add(model)
+    payload: dict[str, Any] = {}
+    if os.path.exists(UNAVAILABLE_MODEL_PATH):
+        try:
+            with open(UNAVAILABLE_MODEL_PATH, "r", encoding="utf-8") as f:
+                payload = json.load(f) or {}
+        except Exception:
+            pass
+
+    for prov, models in unavailable.items():
+        entry = payload.setdefault(prov, {})
+        if not isinstance(entry, dict):
+            entry = {"models": []}
+            payload[prov] = entry
+        entry["models"] = sorted(models)
+
+    entry = payload.setdefault(provider, {"models": []})
+    entry["last_failure_reason"] = reason[:1000]
+    entry["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    try:
+        os.makedirs(os.path.dirname(UNAVAILABLE_MODEL_PATH), exist_ok=True)
+        with open(UNAVAILABLE_MODEL_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        logger.warning(f"[{provider}] '{model}'을 사용 불가 모델 목록({UNAVAILABLE_MODEL_PATH})에 추가했습니다.")
+    except Exception as e:
+        logger.warning(f"unavailable_models.json 저장 실패: {e}")
+
+
+def should_mark_model_unavailable(provider: str, exc: Exception) -> bool:
+    """영구적인 모델/계정 불가 오류만 차단 목록에 추가합니다."""
+    message = str(exc).lower()
+    if "api_key_invalid" in message or "api key invalid" in message:
+        return True
+    if provider in ("nvidia_nim", "openai", "openai_compatible"):
+        return any(term in message for term in ("404", "not found", "model not found", "does not exist", "unsupported model", "deprecated"))
+    if provider == "gemini":
+        return any(term in message for term in ("404", "not found", "is not supported", "invalid_argument", "400"))
+    return False
+
+
+def _normalize_model_ref(value: Any, default_provider: str) -> tuple[str, str]:
+    """모델 설정을 provider/model 쌍으로 정규화합니다."""
+    if isinstance(value, str):
+        val = value.strip()
+        if "gemini" in val.lower():
+            return "gemini", val
+        if "/" in val or any(k in val.lower() for k in ("nemotron", "llama", "deepseek", "gpt", "mistral")):
+            return "nvidia_nim", val
+        return default_provider, val
+    if isinstance(value, Mapping):
+        provider = str(value.get("provider", default_provider)).lower()
+        model = value.get("model")
+        if isinstance(model, str) and model.strip():
+            return provider, model.strip()
+    raise ValueError("모델 설정은 문자열 또는 {provider: ..., model: ...} 형식이어야 합니다.")
+
+
+class GeminiRateLimiter:
+    """Sliding-window RPM/TPM limiter for Gemini calls."""
+
+    def __init__(self, requests_per_minute: int = 5, tokens_per_minute: int = 30000):
+        self.requests_per_minute = max(1, requests_per_minute)
+        self.tokens_per_minute = max(1000, tokens_per_minute)
+        self._requests: deque[float] = deque()
+        self._tokens: deque[tuple[float, int]] = deque()
+        self._lock = threading.Lock()
+
+    def acquire(self, estimated_tokens: int) -> None:
+        tokens = min(max(1, estimated_tokens), self.tokens_per_minute)
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                cutoff = now - 60
+                while self._requests and self._requests[0] <= cutoff:
+                    self._requests.popleft()
+                while self._tokens and self._tokens[0][0] <= cutoff:
+                    self._tokens.popleft()
+
+                used_tokens = sum(item[1] for item in self._tokens)
+                if (
+                    len(self._requests) < self.requests_per_minute
+                    and used_tokens + tokens <= self.tokens_per_minute
+                ):
+                    self._requests.append(now)
+                    self._tokens.append((now, tokens))
+                    return
+
+                wait_for = 1.0
+                if self._requests and len(self._requests) >= self.requests_per_minute:
+                    wait_for = max(wait_for, 60.0 - (now - self._requests[0]))
+                if self._tokens and used_tokens + tokens > self.tokens_per_minute:
+                    wait_for = max(wait_for, 60.0 - (now - self._tokens[0][0]))
+            time.sleep(wait_for)
+
+
+_GLOBAL_GEMINI_LIMITER: GeminiRateLimiter | None = None
+
+
+def _get_global_gemini_limiter(rpm: int, tpm: int) -> GeminiRateLimiter:
+    global _GLOBAL_GEMINI_LIMITER
+    if _GLOBAL_GEMINI_LIMITER is None:
+        _GLOBAL_GEMINI_LIMITER = GeminiRateLimiter(rpm, tpm)
+    else:
+        _GLOBAL_GEMINI_LIMITER.requests_per_minute = min(_GLOBAL_GEMINI_LIMITER.requests_per_minute, rpm)
+        _GLOBAL_GEMINI_LIMITER.tokens_per_minute = min(_GLOBAL_GEMINI_LIMITER.tokens_per_minute, tpm)
+    return _GLOBAL_GEMINI_LIMITER
 
 
 class ModelGenerationResult:
@@ -122,7 +256,7 @@ def _is_transient_error(err: Exception) -> bool:
 
 
 class UnifiedModelClient:
-    """에이전트별 통합 모델 클라이언트: 자동 재시도, 티어링, Fallback 모델 지원."""
+    """에이전트별 통합 모델 클라이언트: 자동 재시도, 티어링, Fallback 모델 및 차단 모델 필터링 지원."""
 
     def __init__(self, agent_name: str, config: Mapping[str, Any] | None = None):
         self.agent_name = agent_name
@@ -131,30 +265,75 @@ class UnifiedModelClient:
         self.provider = str(self.config.get("provider", "gemini")).lower()
         self.primary_model = self.config.get("model", "gemini-2.5-flash")
         self.fallback_models = list(self.config.get("fallback_models", []))
-        self.candidate_models = [self.primary_model] + [
+
+        # Provider 및 모델 후보군 정규화 및 사용 불가 모델 필터링
+        unavailable = load_unavailable_models()
+        raw_candidates = [self.primary_model] + [
             m for m in self.fallback_models if m != self.primary_model
         ]
+        normalized_candidates: list[tuple[str, str]] = []
+        for cand in raw_candidates:
+            try:
+                p, m = _normalize_model_ref(cand, self.provider)
+                if (p, m) not in normalized_candidates:
+                    normalized_candidates.append((p, m))
+            except Exception:
+                continue
+
+        valid_candidates: list[tuple[str, str]] = []
+        for p, m in normalized_candidates:
+            if m in unavailable.get(p, set()):
+                logger.warning(f"[{self.agent_name}] '{m}'은 차단 목록({UNAVAILABLE_MODEL_PATH})에 있어 후보군에서 제외합니다.")
+            else:
+                valid_candidates.append((p, m))
+
+        if not valid_candidates:
+            logger.warning(f"[{self.agent_name}] 모든 모델 후보가 차단 목록에 포함되어 있습니다. 기본 후보군을 유지합니다.")
+            valid_candidates = normalized_candidates
+
+        self.candidate_targets = valid_candidates
+        self.candidate_models = [m for _, m in valid_candidates]
+        self.primary_target = valid_candidates[0]
+        self.primary_model = self.primary_target[1]
 
         self.max_retries = int(self.config.get("max_retries", 2))
         self.timeout_seconds = float(self.config.get("timeout_seconds", 60))
         self.default_temperature = float(self.config.get("temperature", 0.3))
-        self.base_url = self.config.get("base_url", "https://integrate.api.nvidia.com/v1")
+        # Base URL: config 설정 없으면 NIM_BASE_URL / OPENAI_BASE_URL 환경변수 또는 NVIDIA 통합 기본 URL 사용
+        self.base_url = (
+            self.config.get("base_url")
+            or os.getenv("NIM_BASE_URL")
+            or os.getenv("OPENAI_BASE_URL")
+            or "https://integrate.api.nvidia.com/v1"
+        )
         self.max_output_tokens = int(self.config.get("max_output_tokens", 8192))
 
-        # API Keys
+        # Gemini Rate Limiter (RPM/TPM)
+        rate_config = self.config.get("rate_limits", {}) or {}
+        if rate_config:
+            rpm = int(rate_config.get("requests_per_minute", 5))
+            tpm = int(rate_config.get("tokens_per_minute", 30000))
+            self._gemini_limiter: GeminiRateLimiter | None = _get_global_gemini_limiter(rpm, tpm)
+        else:
+            self._gemini_limiter = None
+
+        # API Keys: 개별 에이전트 설정에서 불필요하게 중복 기재하지 않고 전역 환경변수(GEMINI_API_KEY, NIM_API_KEY, OPENAI_API_KEY) 우선 활용
+        api_key_override = self.config.get("api_key")
         self.gemini_api_key = (
-            os.getenv(self.config.get("api_key_env", "GEMINI_API_KEY"))
+            api_key_override
+            or os.getenv(self.config.get("api_key_env", "GEMINI_API_KEY"))
             or os.getenv("GEMINI_API_KEY")
             or ""
         ).strip()
         self.nim_api_key = (
-            os.getenv(self.config.get("api_key_env", "NIM_API_KEY"))
+            api_key_override
+            or os.getenv(self.config.get("api_key_env", "NIM_API_KEY"))
             or os.getenv("NIM_API_KEY")
             or os.getenv("OPENAI_API_KEY")
             or ""
         ).strip()
 
-        # 영속적 클라이언트 풀 사전 초기화 (연결 지연 및 핸드셰이크 오버헤드 최소화)
+        # 영속적 클라이언트 풀 사전 초기화
         self._nim_client = None
         if self.nim_api_key:
             try:
@@ -267,7 +446,6 @@ class UnifiedModelClient:
 
     def _generate_mock_result(self, prompt: str, response_mime_type: str | None = None) -> ModelGenerationResult:
         """API 호출 없이 테스트를 수행할 수 있는 고속 Mock 응답기."""
-        import json
         if response_mime_type == "application/json" or "JSON" in prompt or "json" in prompt:
             if "Sub-TOC" in prompt or "소주제" in prompt:
                 mock_text = json.dumps(["최신 현황 및 주요 쟁점", "실증 데이터 및 세부 비교", "소결: 본 절의 주요 시사점 및 연계 방향"], ensure_ascii=False)
@@ -306,16 +484,20 @@ class UnifiedModelClient:
 
         last_error: Exception | None = None
 
-        for model in self.candidate_models:
-            m_lower = model.lower()
-            if "gemini" in m_lower or "google" in m_lower:
-                is_gemini = True
-            elif "/" in model or any(k in m_lower for k in ("nemotron", "llama", "deepseek", "gpt", "mistral")):
-                is_gemini = False
-            else:
-                is_gemini = (self.provider == "gemini")
+        for target_provider, model in self.candidate_targets:
+            # 런타임에 새로 차단된 모델인지 재확인
+            current_unavailable = load_unavailable_models().get(target_provider, set())
+            if model in current_unavailable:
+                print(f"    [{self.agent_name}] ⏭️ '{model}' 차단 목록 등록 확인되어 건너뜀.", flush=True)
+                continue
 
+            is_gemini = (target_provider == "gemini")
             provider_label = "Google Gemini" if is_gemini else "NVIDIA NIM"
+
+            # Gemini Rate Limiting
+            if is_gemini and self._gemini_limiter:
+                est_tokens = max(1, (len(full_prompt) + 2) // 3) + self.max_output_tokens
+                self._gemini_limiter.acquire(est_tokens)
 
             for attempt in range(self.max_retries + 1):
                 try:
@@ -346,7 +528,12 @@ class UnifiedModelClient:
                         )
                         time.sleep(sleep_s)
                         continue
-                    # Non-transient or retries exhausted for this model -> try next model in candidate_models
+
+                    # Non-transient or retries exhausted for this model
+                    if should_mark_model_unavailable(target_provider, exc):
+                        persist_unavailable_model(target_provider, model, str(exc))
+                        print(f"    [{self.agent_name}] 🚫 모델 '{model}' 영구 불가 확인되어 차단 목록에 등록.", flush=True)
+
                     print(f"    [{self.agent_name}] 🔄 모델 '{model}' 실패: {exc}. 대체 모델 전환 시도.", flush=True)
                     logger.warning(
                         f"[{self.agent_name}] 모델 '{model}' 실패: {exc}. 대체 모델 전환 시도."
@@ -372,4 +559,3 @@ class UnifiedModelClient:
             temperature=temperature,
             response_mime_type=response_mime_type,
         )
-

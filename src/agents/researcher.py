@@ -5,69 +5,72 @@ import logging
 import os
 from pathlib import Path
 import yaml
-from langchain_core.prompts import ChatPromptTemplate
-from src.utils.file_manager import save_file_append_only, build_report_artifact_path, register_artifact, coerce_llm_text
-from src.utils.final_report_guard import should_reuse_or_create_final
-from src.tools.web_search import perform_hybrid_research
-from tenacity import retry, wait_exponential, stop_after_attempt
-from src.utils.model_client import build_llm, record_model_failure, throttle_model_call
 
-# API 셧다운 방지를 위한 지수 백오프 재시도 데코레이터 (최대 3회, 대기시간 점진적 증가)
-@retry(wait=wait_exponential(multiplier=2, min=2, max=10), stop=stop_after_attempt(3))
-def invoke_llm_with_retry(chain, inputs):
-    try:
-        llm_step = chain.last if hasattr(chain, 'last') else chain
-        throttle_model_call(llm_step, inputs)
-        return chain.invoke(inputs)
-    except Exception as e:
-        llm_step = chain.last if hasattr(chain, 'last') else chain
-        record_model_failure(llm_step, e)
-        print("\n================ [에러 추적 리포트] ================")
-        print(f"1. 에러 원문: {str(e)}")
-        
-        # 체인 내부에 바인딩된 LLM 객체에서 모델명 추출
-        try:
-            # chain이 프롬프트|LLM 구조일 경우 step 뒤쪽에 LLM이 있음
-            llm_step = chain.last if hasattr(chain, 'last') else chain
-            if hasattr(llm_step, 'model_name'):
-                print(f"2. 전송된 모델명: {llm_step.model_name}")
-            else:
-                print("2. 전송된 모델명: (직접 속성 확인 불가)")
-        except:
-            pass
-        print("====================================================\n")
-        
-        # tenacity가 재시도할 수 있도록 에러를 다시 던짐
-        raise e
+from src.core.state import ReportState
+from src.models.client import UnifiedModelClient
+from src.tools.search import perform_hybrid_research
+from src.utils.file_manager import (
+    save_file_append_only,
+    build_report_artifact_path,
+    register_artifact,
+)
+from src.utils.final_guard import should_reuse_or_create_final
+
+logger = logging.getLogger("report_generator.agents.researcher")
 
 
-@retry(wait=wait_exponential(multiplier=2, min=2, max=10), stop=stop_after_attempt(3))
-def search_with_retry(query):
-    return perform_hybrid_research(query)
+def _load_config() -> dict:
+    for path in ("config/agents_config.yaml", "poc/config/agents_config.yaml"):
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+    return {}
 
 
-def run_researcher(state):
-    # 자료 조사 로직
-    print(f"  [Researcher] '{state['topic']}' 관련 기초 자료 조사 시작...")
-    
-    # 1. 설정 및 프롬프트 로드
-    with open("config/agents_config.yaml", "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-    with open("prompts/researcher_prompt.md", "r", encoding="utf-8") as f:
-        system_prompt = f.read()
-        
-    researcher_config = config.get("researcher", {})
-    model_name = researcher_config.get("model", "google/gemma-4-31b-it")
-    
-    # 2. LLM 인스턴스화 (GitHub Models 연동 유지)
-    llm = build_llm(
-        agent_name="researcher",
-        agent_config=researcher_config,
-        default_model=model_name,
-        temperature=0.3, # 팩트 위주의 서술을 위해 온도를 약간 낮춤
+def _load_prompt() -> str:
+    for path in ("prompts/researcher_prompt.md", "poc/prompts/researcher_prompt.md"):
+        if os.path.exists(path):
+            return Path(path).read_text(encoding="utf-8")
+    return (
+        "당신은 공공·국책 연구소의 전문 리서처입니다. "
+        "웹 검색 원시 데이터를 엄밀히 분석하여 보고서 작성에 직접 인용할 수 있는 팩트, 통계, 규정 위주의 "
+        "심층 조사보고서를 마크다운으로 작성하십시오."
     )
-    
-    # 3. (임시) 키워드 추출 노드를 건너뛰었으므로 임의 키워드 세팅
+
+
+def _find_relevant_user_sources(keyword: str, source_materials: list[Any]) -> str:
+    """사용자가 직접 제공한 원시 자료에서 해당 키워드와 관련된 텍스트 발췌."""
+    matched_snippets = []
+    for item in source_materials:
+        if not isinstance(item, dict):
+            continue
+        fname = item.get("filename", "")
+        # 시스템 내부 생성 파일(research_*.md)은 제외
+        if fname.startswith("research_") or fname.endswith("_final.md"):
+            continue
+
+        c = item.get("content", "")
+        if not c:
+            continue
+
+        # 키워드 관련 단락 검색
+        words = [w for w in keyword.split() if len(w) >= 2]
+        paras = c.split("\n\n")
+        for p in paras:
+            p_strip = p.strip()
+            if any(w.lower() in p_strip.lower() for w in words):
+                matched_snippets.append(f"[{fname}] {p_strip[:500]}")
+                if len(matched_snippets) >= 4:
+                    break
+        if len(matched_snippets) >= 6:
+            break
+
+    return "\n\n".join(matched_snippets)
+
+
+def run_researcher(state: ReportState) -> ReportState:
+    """Step 4 ~ Step 6: 키워드별 심층 조사, 품질 게이트, 실증 출처 아카이빙."""
+    topic = state["topic"]
     keywords = state.get("keywords", ["시장 동향", "주요 사례"])
     logger.info(f"[Researcher] '{topic}' 심층 자료조사 착수 (키워드 수: {len(keywords)})")
 

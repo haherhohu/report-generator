@@ -3,6 +3,38 @@
 All notable changes to the **Report Generator** project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [v2.1.2] - 2026-09-13
+
+### 🚀 Added
+
+- **사용 불가 모델 동적 제외 및 자동 영속화 (`src/models/client.py`)**:
+  - `load_unavailable_models`: `config/unavailable_models.json`을 읽어 provider별 차단 모델 목록 자동 로드.
+  - `persist_unavailable_model`: 런타임에 404(Model not found) 또는 영구적 파라미터 불가 오류 발생 시 차단 목록에 실시간 기록.
+  - `UnifiedModelClient`: 모델 후보군(`candidate_targets`) 구성 시 차단 목록의 모델을 자동 제외하고 차단되지 않은 첫 번째 가용 모델을 Primary로 자동 승격.
+- **Gemini 슬라이딩 윈도우 Rate Limiter (`src/models/client.py`)**:
+  - `rate_limits` 설정(RPM, TPM) 기반의 정밀 요청/토큰 사전 예약 대기 메커니즘 도입으로 쿼터 고갈 차단.
+- **모델 클라이언트 회귀 검증 단위 테스트 추가 (`tests/test_model_client_unavailable.py`)**:
+  - 모델 참조 정규화, 영구 오류 식별, 사용 불가 모델 사전 필터링 검증 3종 테스트 추가 (총 27개 테스트 100% 통과).
+- **문서 심볼릭 링크 복원 (`changelogs.md`)**:
+  - `changelogs.md -> changelog.md` 링크 복원으로 파일명 접근 호환성 유지.
+
+### 🔄 Changed
+
+- **에이전트 모델 설정 전면 정비 (`config/agents_config.yaml`)**:
+  - 6대 에이전트(`drafter`, `researcher`, `expander`, `reviewer`, `gatekeeper`, `merger`) 설정 완전 복원.
+  - 현재 지원 중단 및 차단된 모델(`google/gemma-4-31b-it`, `meta/llama-3.1-70b-instruct`, `nvidia/llama-3.1-nemotron-70b-instruct`, `gemini-2.5-flash-lite`)을 활성 목록에서 완전 배제.
+  - 안정성이 검증된 모델(`nvidia/nemotron-3.5-lightning-30b-a3b`, `nvidia/nemotron-3-super-120b-a12b`, `openai/gpt-oss-20b`, `openai/gpt-oss-120b`, `gemini-2.5-flash`)로 재배치.
+- **Drafter 및 Researcher 최신 아키텍처 복원 (`src/agents/`)**:
+  - 구버전 브랜치 병합 과정에서 덮어써졌던 `src/agents/drafter.py` 및 `src/agents/researcher.py`를 `main`의 최신 구조(`src.core.*`, `src.models.client.UnifiedModelClient`, `src.tools.search`)로 전면 복원하여 모듈 임포트 에러 완전 해소.
+
+### 🗑️ Removed
+
+- **구버전 레거시 파일 4종 완전 삭제**:
+  - `src/utils/model_client.py` (`src/models/client.py`로 기능 통합 완료)
+  - `src/utils/preprocessor.py` (`src/tools/preprocessor.py`로 대체 완료)
+  - `src/utils/prompting.py` (프롬프트 템플릿 및 통합 클라이언트로 대체 완료)
+  - `src/utils/summarize_refs.py` (`src/tools/preprocessor.py`로 대체 완료)
+
 ## [v2.1.1] - 2026-09-08
 
 ### 🚀 Added
@@ -37,8 +69,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `_build_grounded_bibliography` 구현:
     1. **1순위 (실제 수집된 웹 검색 자료)**: `state["verified_references"]`의 실제 URL 및 검증된 출처명 우선 등재.
     2. **2순위 (사용자 제공 원시자료)**: 웹 검색 부재 시 사용자가 직접 제공한 원본 파일명만 `제공 기초자료: [파일명]` 형태로 등재 (시스템 내부 생성 `research_*.md` 임시 파일은 철저히 배제).
-    3. **3순위 (모든 자료 부재 시)**: 허위 출처를 일체 날조하지 않고 "별도 외부 참고문헌 없음"으로 투명하게 고지.
-    4. **3순위 (모든 자료 부재 시)**: 허위 출처를 일체 날조하지 않고 "별도의 외부 인용 문헌이 존재하지 않습니다"로 투명하게 고지.
+    3. **3순위 (모든 자료 부재 시)**: 허위 출처를 일체 날조하지 않고 "별도의 외부 인용 문헌이 존재하지 않습니다"로 투명하게 고지.
 - **신규 단위 테스트 2종 추가**:
   - `tests/test_researcher_quality.py`: 표만 덜렁 있는 단편 감지, 불량품 Final 박제 방지, 검색 실패 시 사용자 제공 자료 연계 검증.
   - `tests/test_grounded_references.py`: 3단계 참고문헌 엄격 원칙 및 허위 출처(무인항공기 등) 생성 방지 검증.
