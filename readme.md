@@ -145,7 +145,28 @@ NIM_API_KEY=your_nim_api_key_here
 
 # 또는 OpenAI 호환 API를 사용할 경우
 OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_BASE_URL=https://api.openai.com/v1
 ```
+
+### 2-1. 로컬 vLLM/LiteLLM/Open WebUI 스택 사용 (사내 서버)
+
+로컬 모델 기반으로 운영하려면 [deploy/local-llm-stack/](/home/h4/workspaces/report-generator.worktrees/vllm-open-web-ui-setup-guide/deploy/local-llm-stack) 구성을 사용합니다.
+
+```bash
+cd deploy/local-llm-stack
+cp .env.example .env
+# .env에서 HF_TOKEN, 모델 ID, 키값 수정
+docker compose up -d
+```
+
+앱 서버에서 `report-generator`를 실행할 때는 `.env`를 아래처럼 맞춥니다:
+
+```env
+OPENAI_BASE_URL=http://127.0.0.1:4000/v1
+OPENAI_API_KEY=<LITELLM_MASTER_KEY>
+```
+
+에이전트 모델 설정은 [config/agents_config.local_vllm.yaml](/home/h4/workspaces/report-generator.worktrees/vllm-open-web-ui-setup-guide/config/agents_config.local_vllm.yaml)을 기준으로 [config/agents_config.yaml](/home/h4/workspaces/report-generator.worktrees/vllm-open-web-ui-setup-guide/config/agents_config.yaml)에 반영합니다.
 
 ### 3. 파이프라인 CLI 실행
 

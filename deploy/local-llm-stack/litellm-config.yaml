@@ -1,0 +1,23 @@
+model_list:
+  - model_name: llama-3.1-8b-instruct
+    litellm_params:
+      model: openai/llama-3.1-8b-instruct
+      api_base: http://vllm-llama:8000/v1
+      api_key: os.environ/VLLM_API_KEY
+      timeout: 600
+      stream_timeout: 600
+      max_retries: 0
+      # LiteLLM이 Open WebUI로부터 parallel_tool_calls=True를 받아도 무시하도록 설정
+      supports_parallel_function_calling: false
+    model_info:
+      max_tokens: 4096            # 긴 출력이 필요할 때도 안전 범위 유지
+      max_input_tokens: 16384     # vLLM의 16K 설정과 맞춤
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  disable_spend_logs: false
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 1
+  timeout: 600
