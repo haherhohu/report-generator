@@ -1,0 +1,80 @@
+services:
+  vllm-llama:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-llama
+    restart: unless-stopped
+    runtime: nvidia
+    shm_size: 4gb
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      CUDA_VISIBLE_DEVICES: 0,1
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN}
+      VLLM_API_KEY: ${VLLM_API_KEY}
+      VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "0"
+    command:
+      - --host=0.0.0.0
+      - --port=8000
+      - --model=${LLAMA_MODEL_ID}
+      - --served-model-name=${LLAMA_SERVED_NAME}
+      - --dtype=auto
+      - --tensor-parallel-size=2
+      - --max-model-len=16384
+      - --gpu-memory-utilization=0.85
+      - --api-key=${VLLM_API_KEY}
+      - --max-num-seqs=2
+      - --enable-auto-tool-choice
+      - --tool-call-parser=llama3_json
+      - --chat-template=/app/templates/tool_chat_template_llama3.1_json.jinja
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+      - ./templates:/app/templates:ro
+    ports:
+      - "8001:8000"
+    networks:
+      - llm_internal
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./litellm-config.yaml:/app/config.yaml:ro
+      - ./templates:/app/templates:ro
+    command:
+      - "--config=/app/config.yaml"
+      - "--port=4000"
+      - "--num_workers=1"
+    ports:
+      - "4000:4000"
+    networks:
+      - llm_internal
+    depends_on:
+      - vllm-llama
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    environment:
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
+      ENABLE_SIGNUP: ${WEBUI_ENABLE_SIGNUP}
+      OPENAI_API_BASE_URLS: http://litellm:4000/v1
+      OPENAI_API_KEYS: ${LITELLM_MASTER_KEY}
+    volumes:
+      - open-webui-data:/app/backend/data
+    ports:
+      - "4444:8080"
+    networks:
+      - llm_internal
+    depends_on:
+      - litellm
+
+networks:
+  llm_internal:
+    driver: bridge
+
+volumes:
+  hf-cache:
+  open-webui-data:
