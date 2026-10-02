@@ -11,9 +11,11 @@ import threading
 import time
 from typing import Any, Mapping, Literal
 import certifi
-from dotenv import load_dotenv
-
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 if "SSL_CERT_FILE" not in os.environ:
     os.environ["SSL_CERT_FILE"] = certifi.where()
@@ -166,18 +168,38 @@ class ModelGenerationResult:
         return f"<ModelGenerationResult model={self.model_used} provider={self.provider} chars={len(self.text)}>"
 
 
+def _clean_llm_artifacts(text: str) -> str:
+    """CoT 사고과정(<think>), 메타 안내문, 시스템 지침 잔여 텍스트를 제거."""
+    if not text:
+        return ""
+    import re
+    # 1. <think>...</think> 및 [think]...[/think] 제거
+    cleaned = re.sub(r"(?is)<\s*think\s*>.*?<\s*/\s*think\s*>", "", text)
+    cleaned = re.sub(r"(?is)\[\s*think\s*\].*?\[\s*/\s*think\s*\]", "", cleaned)
+    # 2. Here's a thinking process: 등 사고과정 서두 제거
+    cleaned = re.sub(r"(?im)^here'?s\s+(?:a\s+)?thinking\s+process:?.*?(?:\n\n|\r\n\r\n)", "", cleaned)
+    cleaned = re.sub(r"(?im)^thinking\s+process:?.*?(?:\n\n|\r\n\r\n)", "", cleaned)
+    # 3. 시스템 프롬프트(당신은 ~ 수석 집필위원입니다 등) 첫머리 복사 유출 차단
+    cleaned = re.sub(
+        r"(?s)^\s*(?:당신은\s+대한민국|작성\s*방침:|시스템\s*지침:).*?(?:작성하십시오|서술하십시오|준수하십시오|바랍니다)\.?\s*",
+        "",
+        cleaned,
+    )
+    return cleaned.strip()
+
+
 def _coerce_to_str(content: Any) -> str:
     """LLM 응답에서 텍스트만 안전하게 추출 (Gemini, LangChain, OpenAI, dict, list 등 모든 객체 지원)."""
     if content is None:
         return ""
     if isinstance(content, str):
-        return content.strip()
+        return _clean_llm_artifacts(content)
 
     # Gemini SDK GenerateContentResponse 객체 대응
     if hasattr(content, "candidates") and getattr(content, "candidates", None):
         try:
             if hasattr(content, "text") and content.text:
-                return str(content.text).strip()
+                return _clean_llm_artifacts(str(content.text))
         except Exception:
             pass
         # candidates -> content -> parts 순회
@@ -191,7 +213,7 @@ def _coerce_to_str(content: Any) -> str:
                     elif isinstance(part, dict) and "text" in part:
                         parts_text.append(str(part["text"]))
         if parts_text:
-            return "\n\n".join(parts_text).strip()
+            return _clean_llm_artifacts("\n\n".join(parts_text))
 
     # OpenAI ChatCompletion object 대응
     if hasattr(content, "choices") and getattr(content, "choices", None):
@@ -205,7 +227,7 @@ def _coerce_to_str(content: Any) -> str:
     # 리스트 / 튜플 형태
     if isinstance(content, (list, tuple)):
         parts = [_coerce_to_str(p) for p in content]
-        return "\n\n".join(p for p in parts if p)
+        return _clean_llm_artifacts("\n\n".join(p for p in parts if p))
 
     # 딕셔너리 형태 (LangChain 메시지 딕셔너리 or OpenAI dict)
     if isinstance(content, dict):
@@ -218,21 +240,21 @@ def _coerce_to_str(content: Any) -> str:
                 return _coerce_to_str(content[k])
         if "parts" in content:
             return _coerce_to_str(content["parts"])
-        return json.dumps(content, ensure_ascii=False)
+        return _clean_llm_artifacts(json.dumps(content, ensure_ascii=False))
 
     # AIMessage 또는 기타 객체 속성 처리
     if hasattr(content, "text"):
         try:
             val = content.text
             if val:
-                return str(val).strip()
+                return _clean_llm_artifacts(str(val))
         except Exception:
             pass
 
     if hasattr(content, "content"):
         return _coerce_to_str(content.content)
 
-    return str(content).strip()
+    return _clean_llm_artifacts(str(content))
 
 
 def _is_transient_error(err: Exception) -> bool:
@@ -346,7 +368,14 @@ class UnifiedModelClient:
             except Exception:
                 pass
 
-    def _call_gemini_sync(self, model: str, prompt: str, temperature: float, response_mime_type: str | None = None) -> str:
+    def _call_gemini_sync(
+        self,
+        model: str,
+        prompt: str,
+        temperature: float,
+        response_mime_type: str | None = None,
+        system_instruction: str | None = None,
+    ) -> str:
         if not self.gemini_api_key or self.gemini_api_key.startswith("MY_"):
             raise ValueError(f"[{self.agent_name}] GEMINI_API_KEY가 설정되지 않았습니다.")
 
@@ -357,6 +386,8 @@ class UnifiedModelClient:
 
             client = genai.Client(api_key=self.gemini_api_key)
             config_params: dict[str, Any] = {"temperature": temperature}
+            if system_instruction:
+                config_params["system_instruction"] = system_instruction
             if response_mime_type:
                 config_params["response_mime_type"] = response_mime_type
 
@@ -377,7 +408,13 @@ class UnifiedModelClient:
                 temperature=temperature,
                 google_api_key=self.gemini_api_key,
             )
-            response = llm.invoke(prompt)
+            messages = []
+            if system_instruction:
+                from langchain_core.messages import SystemMessage, HumanMessage
+                messages = [SystemMessage(content=system_instruction), HumanMessage(content=prompt)]
+            else:
+                messages = [prompt]
+            response = llm.invoke(messages)
             return _coerce_to_str(response.content)
         except ImportError as exc:
             raise ImportError(
@@ -390,6 +427,7 @@ class UnifiedModelClient:
         prompt: str,
         temperature: float,
         response_mime_type: str | None = None,
+        system_instruction: str | None = None,
     ) -> str:
         if not self.nim_api_key:
             raise ValueError(f"[{self.agent_name}] NIM_API_KEY 또는 OPENAI_API_KEY가 설정되지 않았습니다.")
@@ -404,11 +442,17 @@ class UnifiedModelClient:
         if response_mime_type == "application/json":
             extra_kwargs["response_format"] = {"type": "json_object"}
 
+        # System Role과 User Role을 명확히 분리하여 프롬프트 유출 차단
+        messages: list[dict[str, str]] = []
+        if system_instruction and system_instruction.strip():
+            messages.append({"role": "system", "content": system_instruction.strip()})
+        messages.append({"role": "user", "content": prompt})
+
         # 1. OpenAI SDK 직결 호출 (가장 빠르고 영속 TCP 커넥션 재사용)
         try:
             resp = client.chat.completions.create(
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 temperature=temperature,
                 max_tokens=self.max_output_tokens,
                 **extra_kwargs,
@@ -420,7 +464,7 @@ class UnifiedModelClient:
                 try:
                     resp = client.chat.completions.create(
                         model=model,
-                        messages=[{"role": "user", "content": prompt}],
+                        messages=messages,
                         temperature=temperature,
                         max_tokens=self.max_output_tokens,
                     )
@@ -431,6 +475,7 @@ class UnifiedModelClient:
             # 2. LangChain ChatOpenAI 폴백
             try:
                 from langchain_openai import ChatOpenAI
+                from langchain_core.messages import SystemMessage, HumanMessage
                 llm = ChatOpenAI(
                     model=model,
                     temperature=temperature,
@@ -439,7 +484,11 @@ class UnifiedModelClient:
                     timeout=self.timeout_seconds,
                     max_tokens=self.max_output_tokens,
                 )
-                response = llm.invoke(prompt)
+                lc_messages = []
+                if system_instruction and system_instruction.strip():
+                    lc_messages.append(SystemMessage(content=system_instruction.strip()))
+                lc_messages.append(HumanMessage(content=prompt))
+                response = llm.invoke(lc_messages)
                 return _coerce_to_str(response.content)
             except Exception:
                 raise exc
@@ -448,7 +497,7 @@ class UnifiedModelClient:
         """API 호출 없이 테스트를 수행할 수 있는 고속 Mock 응답기."""
         if response_mime_type == "application/json" or "JSON" in prompt or "json" in prompt:
             if "Sub-TOC" in prompt or "소주제" in prompt:
-                mock_text = json.dumps(["최신 현황 및 주요 쟁점", "실증 데이터 및 세부 비교", "소결: 본 절의 주요 시사점 및 연계 방향"], ensure_ascii=False)
+                mock_text = json.dumps(["최신 현황 및 주요 쟁점", "실증 데이터 및 세부 비교", "요약: 본 절의 핵심 분석 결과"], ensure_ascii=False)
             elif "키워드" in prompt:
                 mock_text = json.dumps(["글로벌 시장 동향 및 통계", "주요국 지원 정책 벤치마킹", "원천기술 TRL 성숙도 분석", "국내외 실증 사례 비교", "리스크 관리 체계"], ensure_ascii=False)
             else:
@@ -457,13 +506,13 @@ class UnifiedModelClient:
             mock_text = (
                 "본문 상세 실증 분석 내용 서술.\n\n"
                 "> **【그림 1-1】 도식화 구조도**\n"
-                "> - 구조: 핵심 동향 ➔ 실증 데이터 진단 ➔ 전략적 시사점\n\n"
+                "> - 구조: 핵심 동향 ➔ 실증 데이터 진단 ➔ 분석 요약\n\n"
                 "| 분석 지표 | 기준 연도 | 수치 (억원/건) | 비고 |\n"
                 "| :--- | :---: | :---: | :--- |\n"
                 "| 글로벌 시장 규모 | 2025 | 45,200 | 공식 통계 |\n"
                 "| 국내 시장 규모 | 2025 | 12,800 | 실태조사 |\n\n"
-                "### 다. 소결: 본 절의 주요 시사점 및 연계 방향\n"
-                "본 절의 분석 결과를 종합하고 차기 과제와의 연계 고리를 명확히 제시함."
+                "### 다. 요약: 본 절의 핵심 분석 결과\n"
+                "본 절에서 도출된 객관적 사실과 실증 지표를 총괄 정리함."
             )
         return ModelGenerationResult(text=mock_text, model_used="mock-engine", provider="mock")
 
@@ -479,7 +528,6 @@ class UnifiedModelClient:
         if os.getenv("MOCK_MODE") == "true" or self.config.get("mock_mode"):
             return self._generate_mock_result(prompt, response_mime_type)
 
-        full_prompt = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
         temp = self.default_temperature if temperature is None else temperature
 
         last_error: Exception | None = None
@@ -496,7 +544,8 @@ class UnifiedModelClient:
 
             # Gemini Rate Limiting
             if is_gemini and self._gemini_limiter:
-                est_tokens = max(1, (len(full_prompt) + 2) // 3) + self.max_output_tokens
+                total_len = len(prompt) + (len(system_instruction) if system_instruction else 0)
+                est_tokens = max(1, (total_len + 2) // 3) + self.max_output_tokens
                 self._gemini_limiter.acquire(est_tokens)
 
             for attempt in range(self.max_retries + 1):
@@ -505,10 +554,22 @@ class UnifiedModelClient:
                     t0 = time.time()
 
                     if is_gemini:
-                        text = self._call_gemini_sync(model, full_prompt, temp, response_mime_type)
+                        text = self._call_gemini_sync(
+                            model,
+                            prompt,
+                            temp,
+                            response_mime_type,
+                            system_instruction=system_instruction,
+                        )
                         used_provider = "gemini"
                     else:
-                        text = self._call_nim_sync(model, full_prompt, temp, response_mime_type)
+                        text = self._call_nim_sync(
+                            model,
+                            prompt,
+                            temp,
+                            response_mime_type,
+                            system_instruction=system_instruction,
+                        )
                         used_provider = "nvidia_nim"
 
                     if text and text.strip():

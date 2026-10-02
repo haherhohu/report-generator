@@ -5,3 +5,14 @@ target_core_min_length: 3000 # 코어 전략 장(단일 절당) 기준 분량 (�
 target_total_min_length: 200000 # 전체 최종 보고서 목표 최소 분량 (자) (30p: 40,000자 / 200p: 250,000자)
 max_duplicate_threshold: 5 # 동일 키워드/섹션 중복 생성 시 Final 강제 고정 임계치
 checkpoint_db_path: "workspace/checkpoints/report_pipeline.sqlite"
+
+# v2 신규 파이프라인 설정 (검증, 번역, Fact/Stance 분리)
+verification_level: "strict" # "strict" | "standard"
+translation_chunk_size: 3000 # 번역 시 청크 분할 단위 (글자 수 기준)
+chunk_overlap: 200 # 청크 간 문맥 단절 방지용 오버랩 (글자 수)
+stance_injection_targets: # Stance 반영 허용 챕터 역할 (시사점/결론에만 국한)
+  - "implication"
+  - "policy_proposals"
+  - "action_plans"
+  - "final_conclusion"
+

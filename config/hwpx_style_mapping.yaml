@@ -1,0 +1,121 @@
+# Markdown to HWPX Style Mapping Specification
+# 대상 양식 템플릿: krauv_template.hwpx 기준
+template_file: "krauv_template.hwpx"
+
+# 1. 표지(Cover Page) 매핑
+cover:
+  title:
+    target_para_index: 9
+    style_name: "큰제목(견고딕20)"
+    style_id: "17"
+    char_pr_id: "17" # 32pt 견고딕 Bold
+  subtitle:
+    target_para_index: 8
+    style_name: "바탕글"
+    style_id: "0"
+    char_pr_id: "17"
+  date:
+    target_para_index: 13
+    style_name: "바탕글"
+    style_id: "0"
+    char_pr_id: "15" # 20pt
+  organization:
+    target_para_index: 19
+    style_name: "바탕글"
+    style_id: "0"
+    char_pr_id: "18" # 28pt Bold
+
+# 2. 제목(Headings) 계층 매핑
+headings:
+  h1: # 최상위 제목 (# ...)
+    style_name: "큰제목(견고딕20)"
+    style_id: "17"
+    para_pr_id: "6"
+    char_pr_id: "9"
+  h2: # 대단원/장 제목 (## Ⅰ. ... 또는 ## 1. ...)
+    style_name: "Ⅰ."
+    style_id: "2"
+    para_pr_id: "9"
+    char_pr_id: "30" # 18pt Bold HY중고딕
+  h3: # 중단원/절 제목 (### 1. ... 또는 ### 1-1. ...)
+    style_name: "1."
+    style_id: "3"
+    para_pr_id: "14"
+    char_pr_id: "28" # 15pt Bold HY중고딕
+  h4: # 소단원/항 제목 (### 1) ... 또는 #### ...)
+    style_name: "1-1"
+    style_id: "4"
+    para_pr_id: "23"
+    char_pr_id: "23" # 13pt Bold HY중고딕
+  h5: # 목/세부 항목 (1) ... 또는 가) ...)
+    style_name: "1)"
+    style_id: "7"
+    para_pr_id: "33"
+    char_pr_id: "36" # 12pt HY중고딕
+
+# 3. 본문 단락 및 개조식 목록 매핑
+content:
+  body_paragraph: # 일반 서술형 단락 (문단 시작 맨 앞 빈칸 하나 " " 추가, 기본 바탕글)
+    style_name: "바탕글"
+    style_id: "0"
+    para_pr_id: "0"
+    char_pr_id: "0" # 10pt 함초롬바탕
+  reference_item: # 참고문헌 전용 단락 (좌측 정렬 및 영문/URL 자간 늘어남 방지)
+    style_name: "바탕글"
+    style_id: "0"
+    para_pr_id: "1050"
+    char_pr_id: "0"
+  bullet_level1: # 1단계 개조식 (○ ...)
+    style_name: "○ 내용"
+    style_id: "8"
+    para_pr_id: "30"
+    char_pr_id: "37" # 11.5pt HY중고딕
+    prefix: "○ "
+  bullet_level2: # 2단계 개조식 (- ...)
+    style_name: "○ 내용"
+    style_id: "8"
+    para_pr_id: "1030"
+    char_pr_id: "37" # 11.5pt HY중고딕
+    prefix: "- "
+  quote_block: # 인용 블록 (> ...)
+    style_name: "바탕글 사본8"
+    style_id: "25"
+    para_pr_id: "3"
+    char_pr_id: "19"
+  caption_table: # 표 캡션 (**[표 ...]**)
+    style_name: "캡션_표"
+    style_id: "12"
+    para_pr_id: "28"
+    char_pr_id: "38" # 9pt 돋움 좌측정렬
+  caption_figure: # 그림 캡션 (**【그림 ...】**)
+    style_name: "캡션_그림"
+    style_id: "6"
+    para_pr_id: "35"
+    char_pr_id: "40" # 9pt HY중고딕 중앙정렬
+  footnote: # 각주/출처 표기 (※ ...)
+    style_name: "각주"
+    style_id: "40"
+    para_pr_id: "40"
+    char_pr_id: "43" # 9pt 함초롬바탕
+
+# 4. 표(Table) 서식 매핑
+table:
+  total_width: 49000 # 본문 인쇄 영역 전체 폭 (A4 가로폭 - 좌우 여백 안전 마진)
+  border_fill_table: "5"
+  border_fill_header: "10" # 헤더 셀 연회색 음영 (#E5E5E5)
+  border_fill_cell: "8" # 일반 데이터 셀
+  header:
+    style_name: "표_제목_중앙"
+    style_id: "10"
+    para_pr_id: "19"
+    char_pr_id: "31" # 8pt Bold 돋움 중앙정렬
+  cell_center:
+    style_name: "표_내용_중앙"
+    style_id: "11"
+    para_pr_id: "19"
+    char_pr_id: "24" # 8pt 돋움 중앙정렬
+  cell_left: # 기본 중앙정렬로 통일 (정렬 흔들림 방지)
+    style_name: "표_내용_중앙"
+    style_id: "11"
+    para_pr_id: "19"
+    char_pr_id: "24" # 8pt 돋움 중앙정렬

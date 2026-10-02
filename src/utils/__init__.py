@@ -5,6 +5,9 @@ from src.utils.file_manager import (
     register_artifact,
     normalize_slug,
     next_versioned_path,
+    normalize_phase,
+    get_existing_artifact_versions,
+    get_latest_artifact_path,
 )
 from src.utils.final_guard import (
     should_reuse_or_create_final,
@@ -28,6 +31,9 @@ __all__ = [
     "register_artifact",
     "normalize_slug",
     "next_versioned_path",
+    "normalize_phase",
+    "get_existing_artifact_versions",
+    "get_latest_artifact_path",
     "should_reuse_or_create_final",
     "get_final_path_for_title",
     "read_text_if_exists",

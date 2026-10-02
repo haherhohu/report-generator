@@ -100,33 +100,7 @@ def run_reviewer(state: ReportState) -> ReportState:
         state["target_sections_for_loop"] = list(missing_chapters)
         return state
 
-    # 2. 전 섹션 교열 및 마크다운 헤딩 깊이 정규화
-    config = _load_config()
-    rev_config = config.get("reviewer", {})
-    client = UnifiedModelClient("reviewer", rev_config)
-    system_prompt = _load_prompt()
+    from src.agents.verifier import run_verifier
+    return run_verifier(state)
 
-    polished_sections = []
-    for s in expanded_sections:
-        raw_text = s.get("content", "")
-        chap_num = s.get("chapter_number", "")
-        sec_num = s.get("section_number", "")
-        title = s.get("title", "")
-        role_type = s.get("role_type", "background_trend")
-
-        # 1차: 결정론적 정규화 및 피동형 정제
-        sanitized = sanitize_intermediate_conclusions(raw_text, role_type=role_type)
-        heading_norm = normalize_markdown_headings(sanitized, chap_num, sec_num, title)
-        polished_text = _apply_deterministic_polish(heading_norm, tone=tone)
-
-        polished_sec = dict(s)
-        polished_sec["content"] = polished_text
-        polished_sections.append(polished_sec)
-
-    state["expanded_sections"] = polished_sections
-    state["reviewer_feedback"] = "승인(Approved). 모든 챕터 구조와 헤딩 뎁스, 문체 규격이 충족되었습니다."
-    state["target_sections_for_loop"] = []
-
-    logger.info("[Reviewer] 전 섹션 교열 및 헤딩 표준화 완료.")
-    return state
 

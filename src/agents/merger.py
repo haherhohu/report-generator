@@ -223,12 +223,23 @@ def run_merger(state: ReportState) -> ReportState:
 
     doc_lines.append("")
 
-    final_merged_text = "\n".join(doc_lines).strip() + "\n"
+    raw_merged_text = "\n".join(doc_lines).strip() + "\n"
 
-    # 6. 최종 파일 저장 (Append-only)
-    file_path = build_report_artifact_path(topic, "v3_final")
+    # 6. 결정론적 마크다운 최종 정제 (> | 표 탈출, CoT 잔여물 삭제, 캡션 계층형 리넘버링)
+    from src.utils.markdown_cleaner import clean_and_format_markdown
+    final_merged_text = clean_and_format_markdown(raw_merged_text)
+
+    # 7. 최종 파일 저장 (Append-only: p5)
+    file_path = build_report_artifact_path(topic, "p5")
     saved_final_path = save_file_append_only(file_path, final_merged_text)
-    register_artifact(state, artifact_type="final-report", title="최종 완성 보고서", path=saved_final_path)
+    register_artifact(state, artifact_type="final-report", title="최종 완성 보고서 (p5)", path=saved_final_path)
+
+    # 8. HWPX 공공 규격 변환 시도
+    from src.tools.hwpx_exporter import export_markdown_to_hwpx
+    hwpx_path = export_markdown_to_hwpx(saved_final_path)
+    if hwpx_path and os.path.exists(hwpx_path):
+        register_artifact(state, artifact_type="final-hwpx", title="최종 HWPX 보고서", path=hwpx_path)
+        state["final_hwpx_path"] = hwpx_path
 
     state["final_report_path"] = saved_final_path
     logger.info(f"[Merger] ✅ 최종 보고서 취합 완료! 저장 경로: {saved_final_path}")

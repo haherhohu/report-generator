@@ -71,21 +71,109 @@ def save_file_append_only(path: str, content: Any) -> str:
     return final_path
 
 
+def normalize_phase(phase: str) -> str:
+    """하위 호환성 유지: 이전 v1, v2, v3, v3_final 등을 새로운 p1~p5 표준으로 매핑."""
+    p = str(phase or "p1").lower().strip()
+    if p in ("v1", "p1", "draft", "outline"):
+        return "p1"
+    if p in ("v2", "p2", "grounded", "material"):
+        return "p2"
+    if p in ("v3", "p3", "section", "expanded"):
+        return "p3"
+    if p in ("p4", "verify", "verifier", "review"):
+        return "p4"
+    if p in ("v3_final", "p5", "final", "merged"):
+        return "p5"
+    return p
+
+
 def build_report_artifact_path(
     topic: str,
     phase: str,
     *,
     section_title: str | None = None,
+    version: int | str | None = None,
+    is_final: bool = False,
     base_dir: str = "workspace/report",
 ) -> str:
-    """보고서 및 섹션별 단계에 맞는 아티팩트 파일 경로 생성."""
+    """
+    보고서 및 섹션별 단계(phase)와 버전(v1~vn)에 맞는 아티팩트 파일 경로 생성.
+
+    Phases:
+      - p1: 기초 초안 기획 (Drafting / Outline)
+      - p2: 사용자 기초자료 반영 초안 (Material-grounded Draft)
+      - p3: 각 챕터별 중간본 팽창 (Expanded chapter sections)
+      - p4: 검증 및 정제 (Verification / Reviewer audit)
+      - p5: 취합 및 최종 완성본 (Merged final report)
+
+    Naming convention:
+      - 일반 단계 산출물: {topic}_{phase}_v{version}.md (예: AI_동향_p1_v1.md, AI_동향_p2_v1.md)
+      - 섹션별 산출물: {topic}_{phase}_{section}_v{version}.md (예: AI_동향_p3_1.1_기술개요_v1.md)
+      - 최종 완성 산출물: {topic}_{phase}_final_v{version}.md (예: AI_동향_p5_final_v1.md)
+    """
     safe_topic = normalize_slug(topic)
+    norm_phase = normalize_phase(phase)
+
+    # p5 이거나 명시적 is_final인 경우 또는 원래 phase가 final/v3_final인 경우 final 표기 활성화
+    marked_final = is_final or norm_phase == "p5" or str(phase).lower().strip() in ("final", "v3_final")
+
+    if version is not None:
+        v_num = str(version).lstrip("vV")
+        v_tag = f"v{v_num}" if v_num else "v1"
+    else:
+        v_tag = "v1"
+
+    final_tag = "_final" if marked_final else ""
+
     if section_title:
         safe_title = normalize_slug(section_title)
-        filename = f"{safe_topic}_{phase}_{safe_title}.md"
+        filename = f"{safe_topic}_{norm_phase}_{safe_title}{final_tag}_{v_tag}.md"
     else:
-        filename = f"{safe_topic}_{phase}.md"
+        filename = f"{safe_topic}_{norm_phase}{final_tag}_{v_tag}.md"
+
     return next_versioned_path(os.path.join(base_dir, filename))
+
+
+def get_existing_artifact_versions(
+    topic: str,
+    phase: str,
+    *,
+    section_title: str | None = None,
+    base_dir: str = "workspace/report",
+) -> list[str]:
+    """해당 주제 및 단계(phase)에서 이미 생성된 버전별 아티팩트 파일 경로 목록을 버전 순으로 반환."""
+    if not os.path.exists(base_dir):
+        return []
+    safe_topic = normalize_slug(topic)
+    norm_phase = normalize_phase(phase)
+
+    if section_title:
+        safe_title = normalize_slug(section_title)
+        pattern = re.compile(rf"^{re.escape(safe_topic)}_{re.escape(norm_phase)}_{re.escape(safe_title)}(?:_final)?_v(\d+)\.md$")
+    else:
+        pattern = re.compile(rf"^{re.escape(safe_topic)}_{re.escape(norm_phase)}(?:_final)?_v(\d+)\.md$")
+
+    matched = []
+    for fname in os.listdir(base_dir):
+        m = pattern.match(fname)
+        if m:
+            version_num = int(m.group(1))
+            matched.append((version_num, os.path.join(base_dir, fname)))
+
+    matched.sort(key=lambda x: x[0])
+    return [p for _, p in matched]
+
+
+def get_latest_artifact_path(
+    topic: str,
+    phase: str,
+    *,
+    section_title: str | None = None,
+    base_dir: str = "workspace/report",
+) -> str | None:
+    """해당 주제 및 단계(phase)의 최신 버전 아티팩트 경로를 반환. 없으면 None."""
+    versions = get_existing_artifact_versions(topic, phase, section_title=section_title, base_dir=base_dir)
+    return versions[-1] if versions else None
 
 
 def register_artifact(state: dict, *, artifact_type: str, title: str, path: str, detail: str | None = None) -> dict:

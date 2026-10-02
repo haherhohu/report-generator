@@ -88,6 +88,10 @@ async def _process_single_section(
                 "draft_path": guard_res["path"],
             }
 
+        knowledge_context = state.get("knowledge_context", {}) or {}
+        strategic_stance = str(knowledge_context.get("strategic_stance") or "")
+        allowed_stance_roles = knowledge_context.get("allowed_stance_roles")
+
         # 2. 챕터 성격별 동적 라우팅 지침 획득
         ref_summary = "\n".join([
             f"- {m.get('filename')}: {m.get('content', '')[:300]}"
@@ -100,6 +104,8 @@ async def _process_single_section(
             tone=tone,
             direction=direction,
             source_summary=ref_summary,
+            strategic_stance=strategic_stance,
+            allowed_stance_roles=allowed_stance_roles,
         )
         specific_instruction = route_meta["specific_instruction"]
 
@@ -117,7 +123,7 @@ async def _process_single_section(
 지시사항:
 1. 본 부록 절의 성격에 맞추어, 수집된 팩트 데이터와 관계 법령, 정책 실태 통계를 객관적 데이터시트 및 목록 형태로 정리하십시오.
 2. 가상의 통계나 엉뚱한 분야의 수치를 지어내지 말고, 제공된 참고 데이터와 실제 주제('{topic}')에 직접 부합하는 항목으로 작성하십시오.
-3. 마크다운 표(Table)와 불릿 리스트 형태로 정리하되, 각 표마다 세부 항목에 대한 팩트 해설을 함께 서술하십시오.
+3. 마크다운 표(Table)와 불릿 리스트 형태로 정리하되, 각 표마다 세부 항목에 대한 팩트 해설을 함께 서술하십시오. (표는 인용 블록 > 안에 넣지 마십시오)
 4. 어미는 '~함', '~임'을 준수하십시오.
 """
             app_text = ""
@@ -129,7 +135,7 @@ async def _process_single_section(
                 app_text = generate_fallback_section(topic, chap_num, sec_title, role_type, tone)
 
             norm_content = normalize_markdown_headings(app_text, chap_num, sec_num, sec_title)
-            file_path = build_report_artifact_path(topic, "v3", section_title=sec_title)
+            file_path = build_report_artifact_path(topic, "p3", section_title=sec_title)
             saved_path = save_file_append_only(file_path, norm_content)
             register_artifact(state, artifact_type="section-expanded", title=sec_title, path=saved_path)
             return {
@@ -142,7 +148,7 @@ async def _process_single_section(
             }
 
 
-        # 4. Step 1: 세부 목차(Sub-TOC) 선행 기획 (기획된 핵심 토픽 및 표 기반 정밀 세분화)
+        # 4. Step 1: 세부 목차(Sub-TOC) 선행 기획 (시사점 인플레이션 방지 및 팩트 요약 체계)
         key_topics = section_data.get("key_topics", [])
         planned_tables = section_data.get("planned_tables", [])
         planned_case_studies = section_data.get("planned_case_studies", [])
@@ -152,11 +158,16 @@ async def _process_single_section(
         cases_str = ("\n[기획된 선도 사례]\n" + "\n".join([f"- {c}" for c in planned_case_studies])) if planned_case_studies else ""
 
         is_conclusion = (role_type == "final_conclusion")
-        conclusion_guideline = (
-            "본 장은 보고서 전체의 대미를 장식하는 종합 결론 장이므로, 마지막 소주제는 '대정부·산업계 최종 정책 권고사항 및 종합 결론' 형태로 구성하십시오."
-            if is_conclusion
-            else "본 절은 본문 챕터(1~N-1장)이므로 전체 결론을 미리 내리지 말고, 마지막 소주제는 반드시 '소결: 본 절의 주요 시사점 및 연계 방향' 형태로 구성하여 절 내부 논리를 매듭지으십시오."
-        )
+        is_implication = (role_type == "implication")
+        if is_conclusion:
+            conclusion_guideline = "본 장은 보고서 전체의 대미를 장식하는 종합 결론 장이므로, 마지막 소주제는 '대정부·산업계 최종 정책 권고사항 및 종합 결론' 형태로 구성하십시오."
+            final_sub = "대정부·산업계 최종 정책 권고사항 및 종합 결론"
+        elif is_implication:
+            conclusion_guideline = "본 장은 종합 시사점 도출 장이므로, 마지막 소주제는 '종합 시사점 및 미래 전망' 형태로 구성하십시오."
+            final_sub = "종합 시사점 및 미래 전망"
+        else:
+            conclusion_guideline = "본 절은 본문 실증/동향 챕터이므로 정책 제언이나 시사점을 작성하지 말고, 마지막 소주제는 반드시 '요약: 본 절의 핵심 분석 결과' 형태로 구성하여 분석된 객관적 사실만 정리하십시오."
+            final_sub = "요약: 본 절의 핵심 분석 결과"
 
         toc_prompt = f"""
 전체 보고서 주제: {topic}
@@ -179,7 +190,7 @@ async def _process_single_section(
 지시사항:
 1. 위 기획된 핵심 토픽과 필수 데이터 표를 누락 없이 구체적으로 다루기 위해, 본 절의 세부 소주제(Sub-TOC) 3~4개를 기획하십시오.
 2. {conclusion_guideline}
-3. 반드시 순수 JSON 문자열 배열 형태(예: ["소주제 1", "소주제 2", "소결: 본 절의 주요 시사점 및 연계 방향"])로만 출력하십시오. 코드 블록이나 설명은 배제하십시오.
+3. 반드시 순수 JSON 문자열 배열 형태(예: ["소주제 1", "소주제 2", "{final_sub}"])로만 출력하십시오. 코드 블록이나 설명은 배제하십시오.
 """
         sub_tocs = []
         try:
@@ -191,7 +202,6 @@ async def _process_single_section(
             logger.warning(f"[Expander] Sub-TOC 생성 실패, 지능형 기본값 사용: {e}")
 
         if not sub_tocs:
-            final_sub = "대정부·산업계 최종 정책 권고사항 및 종합 결론" if is_conclusion else "소결: 본 절의 주요 시사점 및 연계 방향"
             if key_topics:
                 sub_tocs = [f"{t} 심층 분석" for t in key_topics[:2]]
                 if planned_tables:
@@ -227,8 +237,12 @@ async def _process_single_section(
 지시사항:
 1. 오직 지정된 세부 소주제('{sub_toc}')에 대한 심층 본문만 작성하십시오.
 2. 【그림 X-X】 도식화 블록(구조도+AI프롬프트+조판규격) 또는 실증 마크다운 표(Table)를 삽입하십시오.
-   - [표/도식만 덜렁 삽입 금지]: 표나 그림만 1개 넣어두고 서술을 2~3줄로 끝내는 것을 엄격히 금지합니다. 표에 들어간 항목, 수치, 비교 지표의 이유와 배경, 현황, 문제점 및 시사점을 최소 3개 이상의 상세 서술형 문단으로 풍부하게 전개하십시오.
-3. [중요] 본 절이 본문 챕터(1~N-1장)인 경우, 보고서 전체 결론을 단독으로 작성하지 마십시오.
+   - [표/도식 독립 작성]: 마크다운 표(Table)는 절대로 인용 블록(>) 안에 넣지 말고 최상위 독립 표로 작성하십시오. 표나 그림만 덜렁 삽입하지 말고 전후로 심층 서술 문단을 충분히 전개하십시오.
+3. [시사점 및 환각 방지]:
+   - 본 절이 일반 본문 챕터(1~N-2장)인 경우, 조기 정책 제언이나 뜬구름 잡기식 시사점을 서술하지 마십시오.
+   - 아직 확정되지 않은 국내 사업을 이미 운영 중인 것처럼 '기정사실화'하지 마십시오.
+   - 존재하지 않는 해외 시설을 날조하지 마십시오.
+   - 출처를 "자체 분석"으로 왜곡하지 마십시오.
 4. 소주제 명칭을 '### 1) {sub_toc}' 형식으로 가장 상단에 적고 본문을 서술하십시오.
 """
             try:
@@ -247,7 +261,7 @@ async def _process_single_section(
         final_section_md = normalize_markdown_headings(sanitized, chap_num, sec_num, sec_title)
 
         # 7. 파일 저장 (Append-only)
-        file_path = build_report_artifact_path(topic, "v3", section_title=sec_title)
+        file_path = build_report_artifact_path(topic, "p3", section_title=sec_title)
         saved_path = save_file_append_only(file_path, final_section_md)
         register_artifact(state, artifact_type="section-expanded", title=sec_title, path=saved_path)
 

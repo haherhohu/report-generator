@@ -1,7 +1,17 @@
 """State definitions for the LangGraph report generation pipeline."""
 from __future__ import annotations
 
-from typing import TypedDict, NotRequired, Any, Literal
+from typing import TypedDict, Any, Literal
+try:
+    from typing import NotRequired
+except ImportError:
+    try:
+        from typing_extensions import NotRequired
+    except ImportError:
+        class _NotRequired:
+            def __getitem__(self, item: Any) -> Any:
+                return item
+        NotRequired = _NotRequired()  # type: ignore
 
 class SectionItem(TypedDict):
     section_id: str
@@ -29,6 +39,9 @@ class ChapterItem(TypedDict):
     sections: list[SectionItem]
 
 class ReportState(TypedDict):
+    # v2 3대 실행 모드: "generate" (생성), "verify" (단독 검증), "translate" (초장문 번역)
+    mode: NotRequired[Literal["generate", "verify", "translate"]]
+
     # 기본 메타데이터
     topic: str
     direction: str | list[str]
@@ -38,6 +51,20 @@ class ReportState(TypedDict):
     target_pages: int
     target_chars: int
     is_blank_slate: bool
+
+    # v2 지식 베이스(KB) 2원화: Fact vs. Stance 컨텍스트
+    knowledge_context: NotRequired[dict[str, Any]]
+    #   - fact_sources: list[str]
+    #   - strategic_stance: str
+    #   - allowed_stance_roles: list[str]
+
+    # v2 단독 검증(Verify) 및 초장문 번역(Translate) 전용 메타데이터
+    source_doc_path: NotRequired[str | None]
+    translation_meta: NotRequired[dict[str, Any] | None]
+    verification_report: NotRequired[list[dict[str, Any]]]
+
+    # v2 시사점 단일 종합 수렴을 위한 중간 핵심 분석 요약(Key Findings) 목록
+    key_findings: NotRequired[list[dict[str, Any]]]
 
     # 입력 자료 및 리서치 아카이브
     source_materials: NotRequired[list[dict[str, Any]]]

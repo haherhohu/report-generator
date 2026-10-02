@@ -88,21 +88,21 @@ def run_drafter(state: ReportState) -> ReportState:
     except Exception as e:
         logger.warning(f"[Drafter] v1 AI 생성 실패, 결정론적 폴백 적용: {e}")
         v1_chapters = generate_fallback_outline(report_type, topic, target_pages)
-        lines = [f"# {topic} (초안 v1)\n", f"- 방향성: {direction_str}\n"]
+        lines = [f"# {topic} (초안 p1)\n", f"- 방향성: {direction_str}\n"]
         for ch in v1_chapters:
             lines.append(f"## {ch['chapter_number']} {ch['title']}")
             lines.append(f"- 역할: {ch['role_type']} (목표: {ch['target_pages']}p)\n")
         v1_content = "\n".join(lines)
 
-    v1_path = build_report_artifact_path(topic, "v1")
+    v1_path = build_report_artifact_path(topic, "p1")
     v1_saved = save_file_append_only(v1_path, v1_content)
-    register_artifact(state, artifact_type="draft", title="초안 v1", path=v1_saved)
-    logger.info(f"[Drafter] Step 1 기초 초안(v1) 저장: {v1_saved}")
+    register_artifact(state, artifact_type="draft", title="초안 p1 v1", path=v1_saved)
+    logger.info(f"[Drafter] Step 1 기초 초안(p1 v1) 저장: {v1_saved}")
 
     target_content = v1_content
     v2_saved = None
 
-    # 3. Step 2: 사용자 기초 자료 반영 업데이트(v2)
+    # 3. Step 2: 사용자 기초 자료 반영 업데이트(p1 v2)
     source_materials = state.get("source_materials", [])
     if source_materials and not state.get("is_blank_slate"):
         source_texts = []
@@ -112,14 +112,14 @@ def run_drafter(state: ReportState) -> ReportState:
         source_bundle = "\n\n".join(source_texts)[:10000]
 
         v2_prompt = f"""
-[기초 초안 v1]
+[기초 초안 p1]
 {v1_content[:4000]}
 
 [사용자 제공 기초 자료]
 {source_bundle}
 
 [지침]
-기초 초안(v1)의 목차 구조를 그대로 유지한 상태에서, 사용자 제공 자료의 구체적 팩트, 법령, 기술 사양을 각 장에 적절히 주입하여 살을 찌운 업데이트 초안(v2)을 마크다운으로 작성하십시오.
+기초 초안(p1)의 목차 구조를 그대로 유지한 상태에서, 사용자 제공 자료의 구체적 팩트, 법령, 기술 사양을 각 장에 적절히 주입하여 살을 찌운 업데이트 초안을 마크다운으로 작성하십시오.
 """
         try:
             res_v2 = client.generate_text_sync(v2_prompt, system_instruction=system_prompt)
@@ -128,10 +128,10 @@ def run_drafter(state: ReportState) -> ReportState:
             logger.warning(f"[Drafter] v2 AI 보강 실패, v1 유지: {e}")
             target_content = v1_content + f"\n\n## 사용자 제공 자료 요약\n{source_bundle[:2000]}"
 
-        v2_path = build_report_artifact_path(topic, "v2")
+        v2_path = build_report_artifact_path(topic, "p2")
         v2_saved = save_file_append_only(v2_path, target_content)
-        register_artifact(state, artifact_type="draft", title="초안 v2", path=v2_saved)
-        logger.info(f"[Drafter] Step 2 업데이트 초안(v2) 저장: {v2_saved}")
+        register_artifact(state, artifact_type="draft", title="자료반영 초안 p2 v1", path=v2_saved)
+        logger.info(f"[Drafter] Step 2 자료반영 초안(p2 v1) 저장: {v2_saved}")
 
     state["foundation_report_path"] = v2_saved or v1_saved
 

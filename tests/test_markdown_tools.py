@@ -46,7 +46,7 @@ def test_sanitize_intermediate_conclusions():
 """
     # For intermediate chapter (e.g. background_trend)
     sanitized = sanitize_intermediate_conclusions(content, role_type="background_trend")
-    assert "### 다. 소결: 본 절의 주요 시사점" in sanitized
+    assert "### 다. 요약: 본 절의 핵심 분석 결과" in sanitized
     assert "## 종합 결론 및 제언" not in sanitized
     assert "## 참고문헌" not in sanitized
 

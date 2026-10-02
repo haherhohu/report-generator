@@ -64,15 +64,15 @@ def normalize_markdown_headings(
 def sanitize_intermediate_conclusions(content: str, role_type: str) -> str:
     """
     본문 챕터(1장 ~ N-1장)에서 독립적으로 전체 '결론 및 제언'을 쓰는 현상을 방지.
-    final_conclusion 역할이 아닌 경우, '결론' 표기를 '[소결: 본 절의 주요 시사점]'으로 대체.
+    일반 본문 절에서는 정책 제언 남발을 차단하고 '[요약: 본 절의 핵심 분석 결과]'로 대체.
     """
-    if role_type == "final_conclusion":
+    if role_type in ("final_conclusion", "implication"):
         return content
 
-    # '## 결론', '### 결론', '종합 결론 및 제언' 등을 '소결: 본 절의 주요 시사점'으로 치환
+    # '## 결론', '### 결론', '종합 결론 및 제언' 등을 '요약: 본 절의 핵심 분석 결과'로 치환하여 시사점 중복 방지
     patterns = [
-        (r"(?m)^#+\s*(?:종합\s*)?결론(?:\s*및\s*(?:시사점|제언))?.*$", "### 다. 소결: 본 절의 주요 시사점"),
-        (r"(?m)^#+\s*(?:향후\s*과제\s*및\s*결론|맺음말).*$", "### 다. 소결: 본 절의 주요 시사점"),
+        (r"(?m)^#+\s*(?:종합\s*)?결론(?:\s*및\s*(?:시사점|제언))?.*$", "### 다. 요약: 본 절의 핵심 분석 결과"),
+        (r"(?m)^#+\s*(?:향후\s*과제\s*및\s*결론|맺음말).*$", "### 다. 요약: 본 절의 핵심 분석 결과"),
     ]
 
     sanitized = content
