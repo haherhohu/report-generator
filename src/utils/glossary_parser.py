@@ -180,6 +180,7 @@ KNOWN_ACRONYMS: dict[str, tuple[str, str]] = {
     "MTBF": ("Mean Time Between Failures", "평균 고장 간격 시간"),
     "MTTR": ("Mean Time to Repair", "평균 수리 소요 시간"),
     "ND": ("North Dakota", "미국 노스다코타 주"),
+    "NDSL": ("National Digital Science Library", "국가과학기술정보서비스(NDSL) 학술 연구 데이터베이스"),
     "NIAS": ("Nevada Institute for Autonomous Systems", "네바다 자율시스템 연구소"),
     "NORAD": ("North American Aerospace Defense Command", "북미 항공우주방위사령부"),
     "NPUAS": ("Northern Plains UAS Test Site", "노스다코타 북부 평원 UAS 시험장"),

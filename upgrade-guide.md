@@ -152,3 +152,134 @@ LLM의 비결정적 출력 오류(표 깨짐, CoT 누출, 태그 미처리)를 �
 3. 엔드투엔드 파이프라인 통합:
    - 생성/검증/번역 파이프라인의 최종 단계에 `markdown_cleaner.py`와 `hwpx_exporter.py`가 반드시 실행되도록 파이프라인 러너를 업데이트하십시오.
 ```
+
+---
+
+# [향후 개선 방향 및 기술 부채 리팩토링 로드맵 (2026-10-03)]
+
+### [핵심 리팩토링 배경]
+
+12종 대규모 공공 보고서(유타, 버지니아, 콜로라도, 텍사스, 캘리포니아, NATO, 비NATO, 미국, 호주, 캐나다, 중남미, 보수교육기관)의 긴급 서식 정제 및 납품 피드백 대응 과정에서, 결과물의 무결성(목차-본문 1:1 완벽 일치, 479개소 표·그림 캡션 개행 분리, 미발표 비공개 문건 및 환각 박멸, HWPX 공공 규격 변환)을 확보하기 위해 **엔진 일부에 단기 집중형 핫픽스(Over-fitted Hotfixes)**가 적용되었습니다.
+
+차기 세션에서는 본 시스템의 범용성(Generalization), 유지보수성, 코드 청결도를 회복하기 위해 아래 순차적 과제를 수행해야 합니다.
+
+---
+
+### [Step 6] Executive Summary 하드코딩 분기 제거 및 범용 요약기 일원화
+
+> **목적**: `src/utils/markdown_cleaner.py` 내에 특정 지역명("영국", "캐나다", "호주", "중남미", "보수교육")으로 고정된 문자열 분기를 제거하고, LLM 기반 범용 요약 엔진으로 일원화합니다.
+
+```markdown
+# Task: Executive Summary 동적 생성기 추상화 및 하드코딩 제거
+
+## 목표
+
+`src/utils/markdown_cleaner.py`의 `generate_executive_summary` 함수에서 특정 보고서 키워드로 분기되어 하드코딩된 Executive Summary 텍스트를 전면 걷어내고, 본문 팩트와 보고서 메타데이터(`report_type`, `topic`, `direction`)를 기반으로 동적 생성하도록 리팩토링하십시오.
+
+## 세부 구현 요구사항
+
+1. `src/utils/markdown_cleaner.py`:
+   - "영국", "캐나다", "호주", "중남미", "보수교육" 등의 조건 분기(`elif "..." in clean_title: return ...`) 완전 삭제.
+   - 대체 방안:
+     - (Option A) 경량 LLM(NIM / Gemini)을 호출하여 본문 도입부 및 결론부를 바탕으로 5줄 표준 요약문(`> **【Executive Summary: 핵심 요약】**...`) 동적 생성.
+     - (Option B) 오프라인 환경을 위해 본문 첫 문단 및 각 장 소결(Implications)에서 완전한 한글 문장 5개를 추출하여 규격화된 요약 블록을 조립하는 범용 알고리즘 완성.
+2. 테스트 검증:
+   - 임의의 새로운 주제(예: "독일 드론 규제 동향", "해양 자율운항선박 기술")가 들어와도 하드코딩 없이 고품질 요약문이 추출되는지 테스트 작성.
+```
+
+---
+
+### [Step 7] 특정 고유명사 타겟 정규식 외부화 (YAML 설정 기반 Fact Engine)
+
+> **목적**: `src/tools/fact_stance_hotfix.py`와 `src/tools/apply_deep_purge_v3.py`에 파이썬 코드로 박혀 있는 1회성 정규식 패턴들을 선언적 설정 파일(`config/fact_rules.yaml`)로 분리합니다.
+
+```markdown
+# Task: 팩트 검증 및 환각 박멸 룰셋의 YAML 설정 기반 분리
+
+## 목표
+
+"유타 UTTR", "콜로라도 OEDIT", "고흥 발사체", "새만금", "Physical AI RAMS 센터", "KURA" 등 13종 보고서 작성 시 발생한 특정 환각을 잡기 위해 코어 코드에 하드코딩된 정규식을 분리하고, 설정 기반의 범용 사실검증 룰 엔진을 구축하십시오.
+
+## 세부 구현 요구사항
+
+1. `config/fact_rules.yaml` 신규 파일 정의:
+   - `banned_phrases`: 비공개 문건 표기, 미확정 가상 센터, 가상 협력체 등 무조건 제거해야 할 패턴 목록.
+   - `stance_downgrade_rules`: 당위적 서술(~해야 한다, 필수적이다)을 정책 제언형(~필요성이 제기된다, 검토해 볼 수 있다)으로 완화하는 문맥 치환 규칙.
+   - `citation_sanitization_rules`: 자체 분석 사칭("자체 분석 결과", "자체 통계 DB")을 공인 데이터 종합 문구로 치환하는 규칙.
+2. `src/tools/fact_stance_hotfix.py` 리팩토링:
+   - 하드코딩된 튜플 리스트를 제거하고 `config/fact_rules.yaml`을 로드하여 정규식을 컴파일·적용하는 모듈형 아키텍처로 개편.
+3. 단위 테스트:
+   - 설정 파일 수정만으로 새로운 환각 단어나 정책 스탠스 교정 룰이 즉시 반영되는지 단위 테스트로 검증.
+```
+
+---
+
+### [Step 8] 파편화된 전·후처리 및 정제 도구의 단일 파이프라인 통합
+
+> **목적**: `src/tools/`, `tests/`, `scratch/`에 산재된 정제 스크립트들을 단일 표준 후처리 모듈(`src/processors/postprocessor.py`)로 일원화합니다.
+
+```markdown
+# Task: 보고서 종합 후처리 파이프라인 단일화
+
+## 목표
+
+대량 보고서 검증 과정에서 파편화된 스크립트(`apply_deep_purge_v3.py`, `comprehensive_report_cleaner.py`, `clean_step1.py`, `update_colorado_chapters.py` 등)의 핵심 기능을 단일 진입점으로 통합하십시오.
+
+## 세부 구현 요구사항
+
+1. `src/processors/postprocessor.py` 생성:
+   - 다음 4단계 정제 프로세스를 단일 클래스(`ReportPostProcessor`)로 파이프라이닝:
+     ① 서식 정제: `<center>` 제거, `<br>` 줄바꿈, 문단 첫머리 1칸 들여쓰기, 참고문헌 좌측 정렬.
+     ② 캡션 및 목차 정합화: 본문 표/그림 앞 개행 분리, 목차-본문 넘버링/제목 1:1 강제 재색인.
+     ③ 팩트 및 논조 정제: `config/fact_rules.yaml` 기반 Deep Purge 수행.
+     ④ 부록 정제: 영문 약어표(Glossary) 알파벳 정렬 및 인용 출처 메타데이터 누수 차단.
+2. CLI 연동:
+   - 단일 파일 또는 디렉터리 단위 일괄 실행 지원:
+     `python -m src.processors.postprocessor --input workspace/report/target.md --output workspace/report/target_clean.md`
+3. 불필요한 일회성 스크립트(`src/tools/apply_deep_purge_v3.py`, `scratch/*`, `tests/clean_*.py`) 안전 아카이빙 또는 정리.
+```
+
+---
+
+### [Step 9] HWPX 변환기 스타일 엔진 100% 선언적 YAML 외부화
+
+> **목적**: `src/tools/hwpx_converter.py` 내부에 존재하는 스타일 매핑 및 레이아웃 로직을 `config/hwpx_style_mapping.yaml`로 완전 위임합니다.
+
+```markdown
+# Task: HWPX 변환 엔진 스타일 완전 외부화 및 스킨 템플릿 지원
+
+## 목표
+
+현재 파이썬 코드 내에 하드코딩된 HWPX 표 정렬, 셀 패딩, 폰트 크기, 개행 규칙을 `config/hwpx_style_mapping.yaml`로 100% 분리하여, 코드 수정 없이 YAML 설정과 템플릿 파일 교체만으로 다양한 관공서/기관 서식을 지원하도록 개선하십시오.
+
+## 세부 구현 요구사항
+
+1. `config/hwpx_style_mapping.yaml` 고도화:
+   - 표(Table) 기본 정렬(중앙/좌측), 헤더 행 배경색, 테두리 두께, 내부 여백 설정 선언.
+   - 콜아웃 박스(Tip, Note, Important)별 바탕색, 테두리, 아이콘 매핑 선언.
+   - 참고문헌, 본문 단락, 헤딩 레벨(H1~H4)별 스타일 ID 및 문단 모양(들여쓰기, 줄간격) 정의.
+2. `src/tools/hwpx_converter.py` 리팩토링:
+   - 내부 스타일 로직을 YAML 설정 기반 렌더러로 변경.
+   - 기관별 템플릿(예: 국책연구원용, 공공기관용, 민간용) 전환 플래그(`--template`) 지원.
+```
+
+---
+
+### [Step 10] 오프라인 및 샌드박스 환경 Fast-Fail 및 로컬 LLM 보호 가드레일
+
+> **목적**: 샌드박스나 폐쇄망에서 인터넷 연결 불가 시 불필요한 외부 API 재시도 루프를 방지하고 신속하게 로컬/오프라인 모드로 전환합니다.
+
+```markdown
+# Task: 네트워크 장애 Fast-Fail 및 차단 목록 보호 메커니즘
+
+## 목표
+
+외부 네트워크가 차단된 환경(샌드박스, 폐쇄망 등)에서 API 호출 시 `Connection error` 또는 DNS 실패가 발생할 경우, 각 모델별 불필요한 백오프 재시도를 즉각 중단(Fast-Fail)하고 안전하게 로컬 vLLM 또는 오프라인 폴백 엔진으로 진입하도록 개선하십시오.
+
+## 세부 구현 요구사항
+
+1. `src/models/client.py`:
+   - 요청 시작 전 또는 첫 실패 시 DNS/네트워크 도달 가능성 1회 체크.
+   - 네트워크 연결 자체가 없는 경우 모든 외부 모델 후보군 순회를 즉시 건너뛰고 로컬 엔드포인트(`OPENAI_BASE_URL`) 또는 오프라인 폴백 엔진으로 즉시 분기.
+   - 단순 일시적 네트워크 단절 오류를 영구적 사용 불가 모델(`persist_unavailable_model`)로 오탐하여 차단 목록에 잘못 등록하는 부작용 방지.
+```

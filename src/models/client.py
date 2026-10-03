@@ -176,7 +176,13 @@ def _clean_llm_artifacts(text: str) -> str:
     # 1. <think>...</think> 및 [think]...[/think] 제거
     cleaned = re.sub(r"(?is)<\s*think\s*>.*?<\s*/\s*think\s*>", "", text)
     cleaned = re.sub(r"(?is)\[\s*think\s*\].*?\[\s*/\s*think\s*\]", "", cleaned)
-    # 2. Here's a thinking process: 등 사고과정 서두 제거
+    # 2. Here's a thinking process: 등 전체 사고과정 블록 제거 (다음 헤딩이나 한글 본문 직전까지)
+    cleaned = re.sub(
+        r"(?is)^\s*(?:here'?s\s+(?:a\s+)?thinking\s+process:?|thinking\s+process:?)\b.*?(?=(?:^#{1,6}\s+|^[가-힣]|\Z))",
+        "",
+        cleaned,
+        flags=re.MULTILINE,
+    )
     cleaned = re.sub(r"(?im)^here'?s\s+(?:a\s+)?thinking\s+process:?.*?(?:\n\n|\r\n\r\n)", "", cleaned)
     cleaned = re.sub(r"(?im)^thinking\s+process:?.*?(?:\n\n|\r\n\r\n)", "", cleaned)
     # 3. 시스템 프롬프트(당신은 ~ 수석 집필위원입니다 등) 첫머리 복사 유출 차단
@@ -185,6 +191,11 @@ def _clean_llm_artifacts(text: str) -> str:
         "",
         cleaned,
     )
+    try:
+        from src.utils.markdown_cleaner import strip_cot_and_system_residue
+        cleaned = strip_cot_and_system_residue(cleaned)
+    except Exception:
+        pass
     return cleaned.strip()
 
 

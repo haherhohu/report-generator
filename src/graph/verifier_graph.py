@@ -11,6 +11,7 @@ from src.agents.verifier import verify_and_correct_chunk
 from src.models.client import UnifiedModelClient
 from src.tools.doc_chunker import split_markdown_by_headings, reassemble_chunks, DocumentChunk
 from src.utils.markdown_cleaner import clean_and_format_markdown
+from src.utils.file_manager import resolve_existing_path
 
 logger = logging.getLogger("report_generator.verifier_graph")
 
@@ -29,7 +30,7 @@ class StandaloneVerifier:
         verification_level: str = "strict",
     ) -> dict[str, Any]:
         """대형 마크다운 보고서 단독 검증·교정 실행."""
-        src_file = Path(input_path)
+        src_file = resolve_existing_path(Path(input_path))
         if not src_file.exists():
             raise FileNotFoundError(f"검증 대상 문서를 찾을 수 없습니다: {input_path}")
 
@@ -101,9 +102,10 @@ class StandaloneVerifier:
 
         if not output_path:
             import re
+            import unicodedata
             from src.utils.file_manager import build_report_artifact_path
-            stem = src_file.stem
-            clean_topic = re.sub(r"_(?:p\d+|v\d+|final|verified)+.*$", "", stem)
+            stem = unicodedata.normalize("NFC", src_file.stem)
+            clean_topic = re.sub(r"_(?:p\d+|v\d+|final|verified|최종본)+.*$", "", stem)
             target_path = build_report_artifact_path(clean_topic, "p5", is_final=True, base_dir="workspace/report")
             out_file = Path(target_path)
         else:

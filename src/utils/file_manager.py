@@ -7,11 +7,29 @@ import re
 from typing import Any
 
 def normalize_slug(value: Any, *, fallback: str = "report") -> str:
-    text = str(value or fallback).strip()
+    import unicodedata
+    text = unicodedata.normalize("NFC", str(value or fallback)).strip()
     text = re.sub(r"[^0-9A-Za-z가-힣_.\-\s]+", "_", text)
     text = re.sub(r"[\s/\\]+", "_", text)
     text = re.sub(r"_+", "_", text).strip("_")
     return text or fallback
+
+
+from pathlib import Path
+
+
+def resolve_existing_path(path: str | Path) -> Path:
+    """주어진 파일 경로가 NFD/NFC 정규화 차이 등으로 인해 존재 여부가 갈릴 때 자동 탐색하여 유효한 경로 반환."""
+    import unicodedata
+    p = Path(path)
+    if p.exists():
+        return p
+    if p.parent.exists():
+        norm_name = unicodedata.normalize("NFC", p.name)
+        for child in p.parent.iterdir():
+            if unicodedata.normalize("NFC", child.name) == norm_name:
+                return child
+    return p
 
 
 def next_versioned_path(path: str) -> str:

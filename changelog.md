@@ -3,6 +3,60 @@
 All notable changes to the **Report Generator** project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [v2.2.0] - 2026-10-03
+
+### 🚀 Added
+
+- **순수 Python 기반 HWPX 변환 및 일괄 생성 엔진 (`src/tools/hwpx_converter.py`, `src/tools/batch_convert_hwpx.py`)**:
+  - `krauv_template.hwpx` 및 `config/hwpx_style_mapping.yaml` 기반 마크다운 ➔ HWPX 공공 규격 자동 변환 지원.
+  - 표 내부 `<br>` 줄바꿈 실제 개행 처리, 셀 정렬(기본 중앙정렬), 좌우 여백 및 콜아웃 상자 완벽 대응.
+  - OCF ZIP 컨테이너 규격(선행 `mimetype`, `Contents/section0.xml` 구조) 자동 무결성 검증.
+  - 12종 국책/공공 보고서 일괄 HWPX 생성 완료 (용량 320KB ~ 480KB, XML 압축해제 2.1MB ~ 3.3MB).
+- **표·그림 캡션 개행 분리 및 목차(TOC) 1:1 무결성 정합화 (`src/tools/comprehensive_report_cleaner.py`, `src/tools/clean_document_structure.py`)**:
+  - 본문 서술문 바로 뒤에 공백 없이 밀착된 표·그림 캡션(`**[표 ...**`, `**【그림 ...**`) 앞 자동 빈 줄(개행) 삽입 (12종 총 479개소 분리, 미분리 잔여 0건 달성).
+  - 목차(TOC) vs 본문 표 번호/제목 1:1 일치율 100% (607개 표 전수 일치).
+  - 목차(TOC) vs 본문 그림 번호/제목 1:1 일치율 100% (533개 그림 전수 일치).
+  - 중복 제목 0건, 목차 내 장·절 번호 접두사 오염 제거, 텍사스 보고서 등 도식화 설명문 혼입 분리 정제.
+- **비공개 문서 및 가상 조직/환각 전수 박멸 클리너 (`src/tools/apply_deep_purge_v3.py`, `src/tools/fact_stance_hotfix.py`)**:
+  - 비공개 미발표 내부 문서 문구(`Physical AI 기반 UAS RAMS 시험·평가센터 구축(안)`) 및 변형 표현 전수 제거.
+  - 국내 미존재 가상 조직/센터(`Physical AI RAMS 센터`), 가상 연계 표현 전수 정제.
+  - 실체 없는 연합체/사업체(`KURA(한국UAS신뢰성협회)`, `한미 공동 RAMS MOU`, `RAMS 사업`) 전수 제거.
+  - 이전 정규식 치환 잔여물(`체계기술`, `체계평가`, `방안전·후`) 정제.
+- **NFC 유니코드 경로 자동 보정 유틸리티 (`src/utils/file_manager.py`)**:
+  - `resolve_existing_path`: macOS/Linux 환경에서 NFD/NFC 자모 분리로 인해 발생하는 파일 탐색 누락 자동 해결.
+
+### 🔄 Changed
+
+- **마크다운 서식 클리너 고도화 (`src/utils/markdown_cleaner.py`)**:
+  - 불필요한 `<center>` 태그 및 HTML 서식 태그 완전 제거.
+  - 문단 첫 머리 공백 1칸 들여쓰기 표준화.
+  - 표 내부 `<br>` 태그의 실제 개행 치환 및 참고문헌 좌측 정렬 규칙 적용.
+  - 참고문헌 내 말줄임표(...) 및 임의 가짜 출처 문구("국내외 공인 기관 통계 및 원천 데이터 종합 재구성") 필터링 강화.
+- **콜로라도 보고서 Ⅳ~Ⅵ장 지역 정합성 복원 (`tests/update_colorado_chapters.py`)**:
+  - 타 지역(고흥 등) 우주발사체 문구 제거 및 콜로라도 OEDIT, JTED, BVLOS 인프라 중심으로 정상화.
+
+### 🐛 Fixed
+
+- **약어표 및 참고문헌 누락/오염 수정 (`src/utils/glossary_parser.py`, `src/tools/clean_appendix.py`)**:
+  - NDSL 등 공공 R&D 약어 정의 추가 및 본문 미인용 가짜 약어 정제.
+  - 본문 서술 중 출처 메타데이터 누수(`clean_internal_bibliography_leaks`) 차단.
+
+### ⚠️ Technical Debt & Over-fitted Hotfixes (향후 정리 및 리팩토링 대상 과제)
+
+이번 12종 대량 보고서의 긴급 납품 및 사용자 피드백 대응 과정에서, 엔진의 범용성보다는 **단기 결과물 정합성 확보를 위해 과도하게 하드코딩(Over-fitting)되거나 임시 분기된 부분**이 존재합니다. 차기 메이저 리팩토링 시 우선 정리해야 할 기술 부채 목록입니다:
+
+1. **`src/utils/markdown_cleaner.py`의 `generate_executive_summary` 특정 지역 하드코딩 분기**:
+   - `clean_title`에 따라 "영국", "캐나다", "호주", "중남미", "보수교육" 등의 Executive Summary 텍스트를 파이썬 코드 내에 고정 문자열로 하드코딩하여 반환하도록 구현됨.
+   - **정리 방향**: 하드코딩 분기를 제거하고, LLM 기반 범용 요약 생성기(보고서 타입 및 본문 팩트 기반 동적 프롬프트)로 일원화해야 함.
+2. **`src/tools/fact_stance_hotfix.py`의 특정 고유명사 타겟 핀포인트 정규식 과밀도**:
+   - "유타 UTTR", "콜로라도 OEDIT", "고흥 발사체", "새만금" 등 특정 13종 보고서 작성 시 발생한 환각 패턴을 맞춤형으로 교정하기 위한 1회성 정규식이 코어 유틸리티에 혼재됨.
+   - **정리 방향**: 도메인 종속적 정규식을 분리하고, 설정 파일 기반의 범용 사실검증 룰셋(`config/fact_rules.yaml`) 또는 정책 스탠스 사전(Policy Lexicon) 구조로 모듈화해야 함.
+3. **정제 도구 및 배치 스크립트 파편화**:
+   - `src/tools/apply_deep_purge_v3.py`, `src/tools/apply_user_feedback_v2.py`, `src/tools/comprehensive_report_cleaner.py`, `src/tools/run_batch_v3.py`, `scratch/*`, `tests/clean_*.py` 등에 다양한 전·후처리 로직이 분산되어 있음.
+   - **정리 방향**: 후처리 파이프라인(`src/processors/postprocessor.py`) 단일 진입점으로 통합하고, 일회성 스크립트 및 테스트 디렉터리 내 정제 유틸리티 정리 필요.
+4. **HWPX 변환기 설정 및 스타일 매핑 추상화**:
+   - 현재 `src/tools/hwpx_converter.py` 내부에 일부 하드코딩된 스타일(표 정렬, 여백, 문단 서식)을 `config/hwpx_style_mapping.yaml`로 100% 외부화하여, 보고서 유형별(정부제출용, 동향조사용, 민간용) 스킨 템플릿 교체가 자유롭도록 개선 필요.
+
 ## [v2.1.2] - 2026-09-13
 
 ### 🚀 Added

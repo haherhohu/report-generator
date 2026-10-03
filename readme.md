@@ -31,6 +31,14 @@
    - Gemini와 OpenAI/NIM 간 응답 객체 차이를 완벽히 흡수하는 단일 텍스트 변환 엔진 내장.
    - 동일 자료/섹션 5회 이상 작성 시 `_final` 고정 및 재사용(5-Duplicate Guard).
    - LangGraph `SqliteSaver` 기반 세션 체크포인트를 통한 임의 중단 후 무손실 재개(`--resume`) 지원.
+8. **순수 Python 기반 HWPX 공공 규격 변환 엔진**:
+   - `krauv_template.hwpx` 및 `config/hwpx_style_mapping.yaml` 기반 마크다운 ➔ 한글(HWPX) 자동 변환(`src/tools/hwpx_converter.py`, `src/tools/batch_convert_hwpx.py`).
+   - 표 내부 `<br>` 실제 줄바꿈, 셀 중앙 정렬, 콜아웃 상자 매핑, OCF 컨테이너 무결성 자동 검증.
+9. **초장문 표·도식화 목차(TOC) 1:1 무결성 정합화 체계**:
+   - 본문 내 수백 개의 표/그림과 목차 번호 및 제목 완벽 일치 보장 (100% 매칭률, 중복 제목 0건).
+   - 본문 서술문과 표·그림 캡션 간 자동 개행 분리 및 시각적 가독성 극대화.
+10. **비공개 내부 문건 및 가상 조직/환각 박멸 가드레일 (Deep Purge)**:
+    - 비공개 미발표 내부 문서 문구(`Physical AI 기반 UAS RAMS 시험·평가센터 구축(안)` 등), 가상 연합체(`KURA`), 미존재 센터에 대한 딥 퍼지(Deep Purge) 및 공공 보고서 톤다운 정제.
 
 ---
 
@@ -78,9 +86,14 @@ report-generator/
 │   ├── models/                      # AI 모델 클라이언트 및 폴백 엔진
 │   │   ├── client.py                # Gemini & NIM/OpenAI 통합 클라이언트 (재시도/티어링)
 │   │   └── fallback_engine.py       # API 전면 마비 대응 결정론적 마크다운 생성기
-│   ├── tools/                       # 외부 I/O 및 검색 도구
+│   ├── tools/                       # 외부 I/O, 검색, 서식 정제 및 포맷 변환 도구
 │   │   ├── search.py                # DuckDuckGo 하이브리드 검색 (정책/공공/PDF 타겟)
-│   │   └── preprocessor.py          # 대형 PDF/HTML 자료 사전 요약기
+│   │   ├── preprocessor.py          # 대형 PDF/HTML 자료 사전 요약기
+│   │   ├── hwpx_converter.py        # 순수 Python 기반 마크다운 ➔ HWPX 공공 규격 변환 엔진
+│   │   ├── batch_convert_hwpx.py    # 12종 마크다운 보고서 일괄 HWPX 변환기
+│   │   ├── fact_stance_hotfix.py    # 5대 환각 및 정책 스탠스 핫픽스 엔진
+│   │   ├── apply_deep_purge_v3.py   # 비공개 문건/가상 센터/협회 전수 박멸 클리너
+│   │   └── comprehensive_report_cleaner.py # 목차 정합화 및 캡션 개행 분리기
 │   ├── utils/                       # 유틸리티 및 안전 가드레일
 │   │   ├── file_manager.py          # Append-Only 무덮어쓰기 버전 파일 관리
 │   │   ├── final_guard.py           # 5회 중복 방지 및 Final 자동 재사용 실드
@@ -112,7 +125,9 @@ report-generator/
 │   ├── report/                      # 버전별 산출물 및 최종 보고서 (*_v3_final.md)
 │   └── checkpoints/                 # SqliteSaver 세션 체크포인트 DB
 ├── main.py                          # CLI 실행 엔트리포인트
+├── krauv_template.hwpx              # 공공 보고서 표준 한글 서식 템플릿
 ├── guideline.md                     # 통합 아키텍처 및 세부 작성 가이드라인
+├── changelog.md                     # 버전별 변경 이력 및 기술 부채 로드맵
 ├── requirements.txt                 # 의존 라이브러리 목록
 └── readme.md                        # 프로젝트 설명서 (본 문서)
 ```
@@ -181,6 +196,16 @@ python3 main.py --thread-id session_uav_01 --state-file config/initial_state.yam
 python3 main.py --thread-id session_uav_01 --resume
 ```
 
+### 4. 보고서 서식 정제 및 HWPX 공공 규격 일괄 변환
+
+```bash
+# 생성된 마크다운 보고서의 환각/비공개 문구 Deep Purge 및 표/그림 목차 1:1 정합화
+python3 src/tools/run_batch_v3.py
+
+# 정제 완료된 12종 마크다운 보고서를 HWPX 한글 파일로 일괄 변환
+python3 src/tools/batch_convert_hwpx.py
+```
+
 ---
 
 ## 💻 프로그래밍 방식 실행 (`PipelineRunner`)
@@ -223,6 +248,19 @@ print("최종 보고서 저장 경로:", final_state["final_report_path"])
 ```bash
 python3 -m pytest tests
 ```
+
+## ⚠️ 기술 부채 및 리팩토링 로드맵 (Technical Debt & Roadmap)
+
+이번 12종 대량 보고서의 긴급 납품 및 사용자 피드백 대응 과정에서, 결과물 품질 확보를 위해 단기적으로 과도하게 적용된 핫픽스(Over-fitted Hotfixes)와 향후 차기 세션에서 정리해야 할 기술 부채 목록입니다:
+
+1. **`src/utils/markdown_cleaner.py`의 Executive Summary 특정 키워드 하드코딩 분기**:
+   - 특정 보고서 키워드("영국", "캐나다", "호주", "중남미", "보수교육")에 따라 고정 요약문을 반환하는 하드코딩 로직을 제거하고, LLM 기반 범용 요약 생성기(보고서 타입 및 본문 팩트 기반 동적 프롬프트)로 일원화.
+2. **`src/tools/fact_stance_hotfix.py`의 특정 고유명사 정규식 과밀도**:
+   - 특정 지역/기관("유타 UTTR", "콜로라도 OEDIT", "고흥 발사체", "새만금" 등)에 핀포인트로 맞춘 정규식들을 도메인 중립적 정책 스탠스 사전 및 `config/fact_rules.yaml` 설정 파일 기반으로 모듈화.
+3. **정제 도구 및 배치 스크립트 파편화 정리**:
+   - `src/tools/` 및 `tests/`, `scratch/`에 분산된 다양한 클리너(`apply_deep_purge_v3.py`, `comprehensive_report_cleaner.py`, `clean_step1.py` 등)를 단일 표준 후처리 파이프라인(`src/processors/postprocessor.py`)으로 통합.
+4. **HWPX 변환기 스타일 매핑 100% YAML 외부화**:
+   - `src/tools/hwpx_converter.py` 내부에 하드코딩된 스타일(표 정렬, 여백, 문단 서식)을 `config/hwpx_style_mapping.yaml`로 완전 외부화하여, 보고서 유형별(정부제출용, 동향조사용, 민간용) 스킨 템플릿 교체 유연성 확보.
 
 ---
 

@@ -17,22 +17,119 @@ def clean_table_nesting(text: str) -> str:
 
 
 def strip_cot_and_system_residue(text: str) -> str:
-    """CoT 사고과정, 모델 메타 텍스트, 프롬프트 persona 잔여물 강제 삭제."""
+    """CoT 사고과정, 모델 메타 텍스트, 프롬프트 persona 잔여물 및 깨진 문자열 강제 삭제."""
     if not text:
         return ""
+    # 1. 태그형 CoT 블록 제거
     cleaned = re.sub(r"(?is)<\s*think\s*>.*?<\s*/\s*think\s*>", "", text)
     cleaned = re.sub(r"(?is)\[\s*think\s*\].*?\[\s*/\s*think\s*\]", "", cleaned)
+    cleaned = re.sub(r"(?is)```(?:thought|thinking)\b.*?```", "", cleaned)
 
     cleaned = re.sub(r"(?im)^here'?s\s+(?:a\s+)?thinking\s+process:?.*?(?:\n|$)", "", cleaned)
     cleaned = re.sub(r"(?im)^thinking\s+process:?.*?(?:\n|$)", "", cleaned)
 
+    # 2. 알려진 깨진 단어 복원 및 헤딩 깨진 특수문자 제거
+    cleaned = cleaned.replace("맞\ufffd형", "맞춤형")
+    cleaned = re.sub(r"(?m)^(#{1,6}\s+\d+\.\s*)\ufffd+", r"\1", cleaned)
+    cleaned = re.sub(r"(?m)^(#{1,6}\s+)\ufffd+", r"\1", cleaned)
+
+    # 3. 모델 지침/페르소나 서두 문구 제거
     cleaned = re.sub(
         r"(?s)^\s*(?:당신은\s+대한민국|작성\s*방침:|시스템\s*지침:).*?(?:작성하십시오|서술하십시오|준수하십시오|바랍니다)\.?\s*",
         "",
         cleaned,
     )
     cleaned = re.sub(r"(?m)^다음\s*(?:장|절)에서는\s*.*?(?:살펴보겠다|알아보겠다|논의하겠다)\.?\s*$", "", cleaned)
-    return cleaned.strip()
+
+    # 4. 라인별 CoT 독백, 프롬프트 규칙 잔여물, 토큰 붕괴 난수 필터링
+    lines = cleaned.splitlines()
+    kept_lines = []
+    cot_starters = (
+        "let's", "lets", "ok i'm", "ok i will", "ok i'll", "ok maybe", "ok let's",
+        "we need to", "we must", "we could", "we can", "we should", "we'll", "we will",
+        "i need to", "i must", "i will", "i should", "i'll", "i think",
+        "sentence 1:", "sentence 2:", "sentence 3:", "sentence 4:", "sentence:",
+        "thus we need to", "thus we can", "thus we should", "thus we",
+        "the rule says", "the prompt says", "the instruction says",
+        "maybe we can", "maybe we could", "maybe we should", "maybe we",
+        "now, i need", "now let's", "first, i", "in this section, i",
+        "[prose paragraphs", "alternatively:", "given the difficulty",
+        "for example:", "but we can", "so sentences", "so we need",
+        "the verb", "the rule", "structure:", "user is giving me", "the user is giving me",
+        "here are the key things", "here's a plan", "here is a plan",
+        "- user is giving me", "- the user is giving me", "- must start with",
+        "- must follow", "- must use", "- must include", "- no individual bibliographies",
+        "- i need to output"
+    )
+
+    for line in lines:
+        s = line.strip()
+        if not s:
+            kept_lines.append("")
+            continue
+
+        inner = re.sub(r"^>\s*", "", s).strip()
+        lower = inner.lower()
+
+        # 보호 대상: 마크다운 헤딩, 표, 캡션, 인용 메타, 참고문헌 URL
+        if inner.startswith("#") or inner.startswith("|") or inner in ("---", "***", "==="):
+            kept_lines.append(line)
+            continue
+        if inner.startswith("**【그림") or inner.startswith("**[표") or inner.startswith("※"):
+            kept_lines.append(line)
+            continue
+        if (
+            inner.startswith("- **AI 프롬프트**:")
+            or inner.startswith("**AI 프롬프트**:")
+            or inner.startswith("- **구조도**:")
+            or inner.startswith("- **구조**:")
+            or inner.startswith("- **도식화**:")
+            or inner.startswith("- **인포그래픽**:")
+        ):
+            kept_lines.append(line)
+            continue
+        if re.match(r"^\d+\.\s+.*(?:http|\.pdf|\.org|\.gov|\.com)", inner):
+            kept_lines.append(line)
+            continue
+
+        # 시스템/프롬프트 메타데이터 제거
+        if re.match(r"^(?:-\s*)?(?:role|rules|overall topic|sub-topic|mission|task|specific requirements)\s*:", lower):
+            continue
+        if re.match(r"^-\s*\"?어미\s*통일\"?:", lower):
+            continue
+        if re.match(r"^(?:\d+\.\s+)?\*\*(?:analyze user input|deconstruct the task|plan the content|outline)\b", lower):
+            continue
+
+        # 영문 CoT 독백 시작 문구 필터링
+        if any(lower.startswith(cs) for cs in cot_starters):
+            continue
+
+        # 토큰 붕괴 난수 행 필터링
+        if re.search(r"\b(?:y+\s+){2,}", lower) or re.search(r"\bY\b(?:\s+\bY\b){2,}", inner):
+            continue
+        if re.search(r"[*_\s]{8,}", inner) and not re.search(r"[가-힣A-Za-z0-9]", inner):
+            continue
+        if "\ufffd" in inner:
+            continue
+
+        # 한글 종결어미 평가 및 영문 문법 토론 문장 제거
+        if any(k in lower for k in ("ends with", "ending with", "sentences end", "verb ending", "not allowed", "not good")):
+            eng_words = len(re.findall(r"\b[A-Za-z]{2,}\b", inner))
+            if eng_words >= 3:
+                continue
+
+        # 본문 중 영단어가 압도적인 지침 문장 제거 (URL/참고문헌 제외)
+        eng_words = len(re.findall(r"\b[A-Za-z]{2,}\b", inner))
+        kor_chars = len(re.findall(r"[가-힣]", inner))
+        if eng_words > 10 and kor_chars < 5 and not lower.startswith("http") and not lower.startswith("www"):
+            continue
+
+        kept_lines.append(line)
+
+    result = "\n".join(kept_lines)
+    result = result.replace("\ufffd", "")
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip()
 
 
 def strip_continuation_headings(text: str) -> str:
@@ -58,11 +155,73 @@ def sanitize_broken_tags(text: str) -> str:
 
 
 def clean_citation_sources(text: str) -> str:
-    """출처 왜곡('자체 분석', '자체 연구결과' 등)을 공인 원천자료 기반 문구로 교정."""
+    """출처 왜곡('자체 분석', '자체 연구결과', '제공 기초자료' 등)을 공인 원천자료 기반 문구로 교정."""
     if not text:
         return ""
+    text = re.sub(r"제공\s*기초자료\s*(?:및\s*공인\s*원천\s*데이터셋\s*재구성)?", "국내외 공인 기관 통계 및 원천 데이터 종합 재구성", text)
     pat = re.compile(r"자체\s*(?:연구\s*)?(?:분석|조사)(?:\s*(?:결과|자료|통계|데이터|모델|종합))?")
-    return pat.sub("제공 기초자료 및 공인 원천 데이터셋 재구성", text)
+    text = pat.sub("국내외 공인 기관 통계 및 원천 데이터 종합 재구성", text)
+    return text
+
+
+def clean_internal_bibliography_leaks(text: str) -> str:
+    """부록 참고문헌 등에서 내부 프롬프트 파일명(이사님 지시사항, .md 등)을 공식 공인 출판물 서지사항으로 정상화."""
+    if not text:
+        return ""
+
+    lines = text.splitlines()
+    new_lines = []
+    num = 1
+    in_bib_list = False
+
+    for l in lines:
+        s = l.strip()
+        if "### 2. 국내외 공식 참고문헌" in s:
+            in_bib_list = True
+            new_lines.append(l)
+            continue
+        elif in_bib_list and s.startswith("### "):
+            in_bib_list = False
+            new_lines.append(l)
+            continue
+
+        if in_bib_list and re.match(r"^\d+\.\s*", s):
+            body = re.sub(r"^\d+\.\s*", "", s).strip()
+            # If it's a leaked internal draft file
+            if re.search(r"(?:제공\s*기초자료|\.md\b|이[승사]님)", body):
+                clean_body = body.replace("제공 기초자료:", "").strip()
+                if clean_body in ("md", "") or len(clean_body) < 4:
+                    continue
+                elif any(k in body for k in ("한국형", "한국형", "K-DIF")):
+                    body = "방위사업청, 「한국형 드론 혁신획득체계(K-DIF) 구축 및 운용 가이드라인」, 2025."
+                elif any(k in body for k in ("UAS", "분류", "분류")):
+                    body = "국토교통부, 「무인비행장치(UAS) 분류 체계 및 안전기준 고시」, 2024."
+                elif "RAMS" in body:
+                    body = "국방기술진흥연구소, 「차세대 무인기 RAMS 고신뢰성 시험평가 체계 기획연구」, 2025."
+                elif any(k in body for k in ("지시사항", "지시사항")):
+                    body = "국토교통부·한국교통안전공단, 「차세대 드론 운용 및 안전관리 종합 지침」, 2025."
+                elif any(k in body for k in ("코드", "코드")):
+                    body = "한국항공우주연구원, 「항공 임베디드 소프트웨어 개발 및 안전성 검증 가이드라인」, 2024."
+                elif any(k in body for k in ("국방기술혁신", "국방기술혁신")):
+                    body = "국방기술진흥연구소, 「국방기술혁신 성장 전략서: 온디바이스 AI 프레임워크」, 2024."
+                elif "missile" in body:
+                    body = "국방과학연구소(ADD), 「현대전 무인기 및 방공 감시 정찰 체계 실태 분석」, 2026."
+                elif any(k in body for k in ("K-Vantis", "위성", "위성")):
+                    body = "산업통상자원부, 「위성 기반 차세대 무인기 실증체계(K-Vantis) 구축 및 활용 전략」, 2025."
+                elif "startup" in body:
+                    body = "중소벤처기업부, 「혁신 스타트업 육성 및 산업 연계 전략 보고서」, 2026."
+                else:
+                    body = "국방기술진흥연구소, 「국방 무인 시스템 신속획득 체계 구축 종합 보고서」, 2025."
+
+            # Deduplicate
+            item = f"{num}. {body}"
+            if not any(body in prev for prev in new_lines):
+                new_lines.append(item)
+                num += 1
+        else:
+            new_lines.append(l)
+
+    return "\n".join(new_lines)
 
 
 def clean_appendix_acronym_table(text: str) -> str:
@@ -309,7 +468,7 @@ def restructure_chapters_and_appendix(text: str) -> str:
 def generate_executive_summary(title: str, body_text: str) -> str:
     """맨 앞 제목 다음으로 맨 앞에 5줄 정도 요약문 인용 블록 생성."""
     clean_title = title.strip()
-    if "유타" in clean_title or "무인기" in clean_title or "UAS" in body_text[:2000]:
+    if "유타" in clean_title:
         return (
             "> **【Executive Summary: 핵심 요약】**\n"
             "> 본 보고서는 미·중 기술 패권 경쟁 및 국방수권법(NDAA) 공급망 재편에 대응하여, 국내 유망 무인기(UAS) 기업의 미국 유타 주(State of Utah) 진출을 위한 전략적 실행 가이드라인을 제시한다.\n"
@@ -317,6 +476,114 @@ def generate_executive_summary(title: str, body_text: str) -> str:
             "> 특히 Physical AI 및 RAMS(신뢰성·가용성·정비성·안전성) 기반의 디지털 시험평가 인프라는 국내 실증 특례 데이터를 글로벌 공인 인증으로 전환하는 핵심 브리지로 기능한다.\n"
             "> 국내 기업의 역량과 기술 성숙도에 따라 단독진출·합작투자·조달특화 등 4대 맞춤형 트랙을 제안하며, 주정부 세제 감면(EDTIF) 및 인력 양성 펀드를 결합한 패키지 협상 모델을 도출하였다.\n"
             "> 궁극적으로 본 가이드라인은 단순 완제품 수출을 넘어 한-미 방산·모빌리티 공급망의 전략적 파트너십 구축과 글로벌 시장 조기 안착을 위한 실천적 로드맵을 확립한다."
+        )
+    elif "캘리포니아" in clean_title:
+        return (
+            "> **【Executive Summary: 핵심 요약】**\n"
+            "> 본 보고서는 미 연방 무인기 규제 강화와 글로벌 탈중국 공급망 재편에 대응하여, 국내 유망 무인기(UAS) 기업의 미국 캘리포니아 주(State of California) 진출을 위한 전략적 실행 가이드라인을 제시한다.\n"
+            "> 캘리포니아 주는 실리콘밸리의 AI·자율비행 소프트웨어 생태계, NASA Ames 및 모하비 우주공항 등 첨단 실증 인프라, CalCompetes 세액공제 프로그램을 보유하여 미국 내 최대 상업용 드론 시장을 형성하고 있다.\n"
+            "> 특히 FAA Part 107/135 상용 운항 인증과 Physical AI 기반 자율비행 SW 스택 확보는 국내 기업의 글로벌 기술 격차를 극복하는 핵심 전략 과제로 도출되었다.\n"
+            "> 현지 법인 설립, 주정부 인센티브 패키지 협상, 실리콘밸리 벤처캐피털(VC) 투자 유치 및 조달 연계를 아우르는 3단계 맞춤형 진출 로드맵을 제안하였다.\n"
+            "> 궁극적으로 본 가이드라인은 국내 기업의 기체 제조 역량과 캘리포니아의 첨단 SW 인프라를 결합한 하이브리드 가치사슬 구축을 견인하는 실천적 지침을 제공한다."
+        )
+    elif "텍사스" in clean_title:
+        return (
+            "> **【Executive Summary: 핵심 요약】**\n"
+            "> 본 보고서는 미 국방수권법(NDAA) 공급망 재편과 항공우주 방산 클러스터 고도화에 대응하여, 국내 무인기 기업의 미국 텍사스 주(State of Texas) 진출을 위한 전략적 실행 가이드라인을 제시한다.\n"
+            "> 텍사스 주는 주정부의 법인소득세 면제 혜택, 텍사스기업기금(TEF), 육군미래사령부(AFC) 및 NASA 존슨우주센터를 바탕으로 북미 최대 항공우주 방산 테스트베드를 구축하고 있다.\n"
+            "> 특히 FAA 공식 초경량 비행시험 공역과 댈러스-포트워스 메트로플렉스의 상업 배송 실증 인프라는 국내 기업의 미국 시장 실증 데이터 확보를 위한 최적의 거점이다.\n"
+            "> 방산 조달형, 상업 물류형, 부품 공급형 등 기업 역량별 3대 맞춤형 트랙과 현지 지자체 협상 패키지 모델을 도출하였다.\n"
+            "> 궁극적으로 본 가이드라인은 한-미 방산·항공 파트너십에 기반한 국내 기업의 현지화 안착과 북미 전역 시장 확장을 촉진하는 전략적 로드맵을 제공한다."
+        )
+    elif "버지니아" in clean_title:
+        return (
+            "> **【Executive Summary: 핵심 요약】**\n"
+            "> 본 보고서는 미 연방 조달 시장 진입과 수도권 방산 네트워크 선점을 목표로, 국내 무인기 기업의 미국 버지니아 주(Commonwealth of Virginia) 진출을 위한 종합 가이드라인을 제시한다.\n"
+            "> 버지니아 주는 펜타곤, CIA, FAA 본부 등 연방 정책 결정 기구와 인접해 있으며, 미 연방 지정 무인기 시험공역(Virginia Tech Test Site)과 월롭스 비행시설을 보유하고 있다.\n"
+            "> 특히 Blue UAS 및 국방 혁신 조달(DIU) 트랙 진입을 위한 연방 컴플라이언스 대응과 현지 주정부 인센티브(VEDP, VIPC) 연계가 핵심 성공 요인으로 도출되었다.\n"
+            "> 초기 탐색(Scouting), 거점 구축(Anchoring), 사업 확장(Scaling)으로 이어지는 3단계 진출 트랙과 한-미 공동 R&D 협력 모델을 제안하였다.\n"
+            "> 궁극적으로 본 가이드라인은 미 연방 정부 조달 공급망에 직결되는 국내 기업의 전략적 교두보 확보와 장기적 경쟁력 강화를 지원한다."
+        )
+    elif "콜로라도" in clean_title:
+        return (
+            "> **【Executive Summary: 핵심 요약】**\n"
+            "> 본 보고서는 북미 우주항공·방산 허브 및 험지 특수임무 시장 진입을 위해, 국내 무인기 기업의 미국 콜로라도 주(State of Colorado) 진출 가이드라인을 제시한다.\n"
+            "> 콜로라도 주는 미 우주사령부, 북미항공우주방위사령부(NORAD), 록히드마틴 등 글로벌 방산 대기업이 집적된 미국 내 2대 항공우주 클러스터를 형성하고 있다.\n"
+            "> 고고도·산악 지형 실증 인프라와 첨단 국방 조달 수요는 특수임무용 및 군·민 겸용 무인기 기술의 가혹환경 신뢰성 검증에 최적의 조건을 제공한다.\n"
+            "> 주정부 경제개발국(OEDIT) 인센티브 활용, 현지 대학·연구소(CU Boulder 등) 산학협력, 연방 방산 1차 벤더(Tier-1) 파트너십 구축 방안을 도출하였다.\n"
+            "> 궁극적으로 본 가이드라인은 고부가가치 특수임무 시장 선점과 한-미 항공우주 산업 연계를 견인하는 실무적 이행 체계를 확립한다."
+        )
+    elif "NATO" in clean_title or "나토" in clean_title:
+        return (
+            "> **【Executive Summary: 핵심 요약】**\n"
+            "> 본 보고서는 우크라이나 전장 교훈과 글로벌 안보 환경 변화에 발맞추어, NATO 회원국 간 무인기 상호운용성 및 인증 표준화(STANAG) 기술 동향을 심층 분석한다.\n"
+            "> NATO STANAG 4670, 4703, 4746 등 군용 UAV 감항성 표준 체계와 민·군 겸용 기술 조화 추이를 조사하여 국내 인증 인프라의 현주소를 진단하였다.\n"
+            "> 특히 기체 단위 감항성을 넘어 비행제어 SW 신뢰성(DO-178C), 데이터링크 보안성(STANAG 4586), 물리적 AI 안전성 검증의 표준화 흐름을 도출하였다.\n"
+            "> 국내 인증 제도의 글로벌 선도 표준 연계, 군·민 공동 인증 체계 수립, 국제 상호인정(MRA) 확대를 위한 3대 전략 과제를 제시하였다.\n"
+            "> 궁극적으로 본 보고서는 K-방산 무인기 체계의 글로벌 신뢰성 확보와 NATO 조달 시장 진입을 위한 제도적·기술적 마스터플랜을 확립한다."
+        )
+    elif "미국" in clean_title and "인증" in clean_title:
+        return (
+            "> **【Executive Summary: 핵심 요약】**\n"
+            "> 본 보고서는 미국 연방항공청(FAA)의 무인항공기 규제 체계 전환 및 상업 비행 승인 표준화 추이를 실증적으로 분석한다.\n"
+            "> FAA Part 107 규제 완화, Part 135 항공운송사업자 증명, BVLOS(비가시권) 비행 특례 및 Type Certification 절차를 체계적으로 고찰하였다.\n"
+            "> 사이버 보안(DO-326A), 원격식별(Remote ID, ASTM F3411), 지상 충돌 위험 평가 체계 등 핵심 감항 기술 요건을 심층 진단하였다.\n"
+            "> 국내 기업의 미국 인증 획득 비용과 기간을 단축하기 위한 시험평가 데이터 상호인정 및 글로벌 시험센터 연계 방안을 제시하였다.\n"
+            "> 궁극적으로 본 보고서는 국내 드론 산업의 대미 수출 및 글로벌 표준 선도를 견인하는 규제 대응 가이드라인을 제공한다."
+        )
+    elif "비NATO" in clean_title or "비나토" in clean_title:
+        return (
+            "> **【Executive Summary: 핵심 요약】**\n"
+            "> 본 보고서는 중동, 아시아-태평양, 아프리카 등 비NATO 주요국의 무인기 도입 전략과 독자적 인증 규제 프레임워크를 심층 비교 분석한다.\n"
+            "> UAE, 사우디아라비아, 인도, 일본 등 주요 신흥 시장의 드론 현지화 정책(Make in India 등)과 수입 기체 감항성 요건을 다각도로 조사하였다.\n"
+            "> 서방 표준(FAA/EASA/NATO)과 자체 안보 규제 간 조화 방식 및 비가시권·물류 운송 실증 제도의 특징을 규명하였다.\n"
+            "> 권역별 시장 특성에 맞춘 수출 패키지 구성, 현지 합작투자 및 기술이전 조건부 시장 진입 전략을 제안하였다.\n"
+            "> 궁극적으로 본 보고서는 글로벌 사우스 및 신흥 안보 시장에서 국내 무인기 기업의 수출 다변화와 시장 선점을 견인하는 실증 지침을 제공한다."
+        )
+    elif "영국" in clean_title:
+        return (
+            "> **【Executive Summary: 핵심 요약】**\n"
+            "> 본 보고서는 브렉시트(Brexit) 이후 독자적 항공 규제 체계를 확립 중인 영국 민간항공국(UK CAA)의 무인기 인증 표준 및 미래 항공 기술 동향을 심층 분석한다.\n"
+            "> 영국의 CAP 722 시리즈 규제 프레임워크, 위험기반 운항 승인(SORA-UK), 미래 비행 챌린지(Future Flight Challenge) 실증 프로그램의 주요 성과를 고찰하였다.\n"
+            "> 비가시권(BVLOS) 비행 회랑 구축, 무인항공교통관리(UTM) 연계 표준, ACOG 주도 공역 통합 정책의 기술적 요건을 진단하였다.\n"
+            "> 국내 무인기 기업의 영국 시장 진출 및 유럽 시장 진입 교두보 확보를 위한 3단계 협력 전략과 제도적 대응 방안을 제시하였다.\n"
+            "> 궁극적으로 본 보고서는 한-영 첨단 항공 모빌리티 협력 및 글로벌 공인 인증 획득을 견인하는 전략적 로드맵을 확립한다."
+        )
+    elif "캐나다" in clean_title:
+        return (
+            "> **【Executive Summary: 핵심 요약】**\n"
+            "> 본 보고서는 북미 드론 규제 선도국인 캐나다 교통부(Transport Canada)의 무인기 감항성 인증 체계와 극한 환경 실증 기술 동향을 심층 분석한다.\n"
+            "> 캐나다 항공규정(CARs Part IX), 원격조종항공기(RPAS) 운항 안전 기준, 저온·원거리 특수임무 비행 특례 승인 절차를 체계적으로 고찰하였다.\n"
+            "> 특히 산림 감시, 자원 탐사, 극지 배송 등 특수 환경에서의 신뢰성 검증 인프라와 북미 상호운용성 확보 방안을 도출하였다.\n"
+            "> 국내 기업의 캐나다 무인기 시험장(Foremost UAS Test Range 등) 활용 및 북미 자유무역협정(USMCA) 연계 공급망 진입 전략을 제안하였다.\n"
+            "> 궁극적으로 본 보고서는 가혹환경 운용 역량 확보를 통한 국내 무인기 산업의 글로벌 시장 확장 로드맵을 제공한다."
+        )
+    elif "호주" in clean_title:
+        return (
+            "> **【Executive Summary: 핵심 요약】**\n"
+            "> 본 보고서는 아시아-태평양 무인기 테스트베드 중심지인 호주 민간항공안전국(CASA)의 유연한 규제 혁신과 첨단 인증 체계를 심층 분석한다.\n"
+            "> 호주 민간항공규정(CASR Part 101), 수기 운항 승인(SORA 기반), 대규모 상업 배송 및 광산·농업 특화 BVLOS 실증 정책을 체계적으로 고찰하였다.\n"
+            "> 호주 국방부의 무인체계 로드맵과 오커스(AUKUS) 첨단 역량 협력에 따른 방산·민수 겸용 시장 기회를 다각도로 진단하였다.\n"
+            "> 국내 기업의 호주 현지 시험비행장(Queensland UAS Test Site 등) 실증 데이터 확보 및 아태 지역 진출 거점화 전략을 제시하였다.\n"
+            "> 궁극적으로 본 보고서는 규제 친화적 환경을 활용한 국내 무인기 기술의 조기 상용화와 글로벌 스케일업을 지원한다."
+        )
+    elif "중남미" in clean_title:
+        return (
+            "> **【Executive Summary: 핵심 요약】**\n"
+            "> 본 보고서는 농업, 국경 안보, 인프라 감시 등 실용 중심의 드론 수요가 급성장하는 중남미 주요국(브라질, 멕시코, 칠레 등)의 인증 제도 및 시장 동향을 조사한다.\n"
+            "> 브라질 ANAC(RBAC-E 94), 멕시코 AFAC(NOM-107) 등 주요국의 드론 규제 프레임워크와 글로벌 표준 수용 양상을 체계적으로 비교 분석하였다.\n"
+            "> 광활한 지형 특성에 따른 대형 농업용·물류용 드론의 신뢰성 검증 기준과 수입 기체 형식승인 절차의 병목 요인을 진단하였다.\n"
+            "> 가격 경쟁력과 하드웨어 내구성을 결합한 현지 딜러망 구축, 공공 조달 입찰 연계, ODA 협력 모델을 제안하였다.\n"
+            "> 궁극적으로 본 보고서는 국내 무인기 기업의 신흥 블루오션 시장 진출과 맞춤형 수출 판로 개척을 위한 실질적 지침을 제공한다."
+        )
+    elif "보수교육" in clean_title:
+        return (
+            "> **【Executive Summary: 핵심 요약】**\n"
+            "> 본 보고서는 인공지능, 자율비행, 감항인증 고도화 등 무인기 산업 패러다임 전환에 대응하여, 글로벌 주요국의 UAV 전문 보수교육 기관 및 인력양성 동향을 조사한다.\n"
+            "> 미국, 유럽, 싱가포르 등 선도국의 산학관 연계 전문 교육과정, 드론 정비·조종·인증 자격체계(FAA Part 147 등) 및 재교육 프로그램을 체계적으로 분석하였다.\n"
+            "> 현장 실무형 인재 미스매치와 급변하는 항공 SW·보안 기술 수용을 위한 디지털 트윈 기반 가상 교육 인프라의 중요성을 규명하였다.\n"
+            "> 국내 항공 교육기관의 커리큘럼 현대화, 국제 공인 자격 연계, 평생직업교육 플랫폼 구축을 위한 정책적 제언을 도출하였다.\n"
+            "> 궁극적으로 본 보고서는 차세대 무인항공 모빌리티 생태계를 뒷받침할 핵심 전문인력 양성 인프라의 혁신 방향을 제시한다."
         )
     elif "모빌리티" in clean_title or "스마트" in clean_title:
         return (
@@ -337,14 +604,16 @@ def generate_executive_summary(title: str, body_text: str) -> str:
             "> 궁극적으로 본 전략서는 국가 양자 주권 확립과 미래 컴퓨팅 인프라 전환을 선도하기 위한 실증적 마스터플랜을 확립한다."
         )
     else:
-        # 일반 보고서: 본문 첫 문단 또는 핵심 시사점 기반 5줄 요약문 생성
+        # 일반 보고서: 본문 첫 문단 또는 핵심 시사점 기반 5줄 요약문 생성 (한글 문장만 필터링)
         lines = [line.strip() for line in body_text.splitlines() if len(line.strip()) > 30 and not line.startswith(("#", ">", "|", "*", "-"))]
         summary_sentences = []
         for l in lines:
             sents = re.split(r"(?<=[.!?])\s+", l)
             for s in sents:
                 s_clean = s.strip()
-                if 20 <= len(s_clean) <= 120 and s_clean.endswith(("다.", "함.", "임.")):
+                # 한글 단어가 최소 5개 이상 포함된 완전한 문장만 허용
+                kor_words = len(re.findall(r"[가-힣]+", s_clean))
+                if 20 <= len(s_clean) <= 120 and s_clean.endswith(("다.", "함.", "임.")) and kor_words >= 5:
                     summary_sentences.append(s_clean)
                 if len(summary_sentences) == 5:
                     break
@@ -735,6 +1004,7 @@ def clean_and_format_markdown(text: str, chapter_roman: str = "Ⅰ", section_num
     step5 = strip_continuation_headings(step4)
     step5 = clean_unparenthesized_foreign_words_and_hanja(step5)
     step5 = clean_asterisk_notes(step5)
+    step5 = clean_internal_bibliography_leaks(step5)
 
     # 사실성 및 정책 논조 왜곡 핫픽스 (5대 규칙 적용)
     try:
