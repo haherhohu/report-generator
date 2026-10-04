@@ -79,6 +79,8 @@ class PipelineRunner:
             state.setdefault("completed_sections", [])
             state.setdefault("expanded_sections", [])
             state.setdefault("artifact_history", [])
+            state.setdefault("target_sections_for_loop", [])
+            state.setdefault("reviewer_missing_chapters", [])
             state.setdefault(
                 "global_directive",
                 "단순 요약이나 병합을 엄격히 금지합니다. 핵심 요약과 실증 데이터를 바탕으로 "

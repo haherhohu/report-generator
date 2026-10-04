@@ -225,9 +225,9 @@ def run_merger(state: ReportState) -> ReportState:
 
     raw_merged_text = "\n".join(doc_lines).strip() + "\n"
 
-    # 6. 결정론적 마크다운 최종 정제 (> | 표 탈출, CoT 잔여물 삭제, 캡션 계층형 리넘버링)
-    from src.utils.markdown_cleaner import clean_and_format_markdown
-    final_merged_text = clean_and_format_markdown(raw_merged_text)
+    # 6. 통합 후처리 파이프라인 (CoT 박멸, 사실성/스탠스 핫픽스, 표/그림 서식, 요약문 및 들여쓰기)
+    from src.processors.postprocessor import process_report_markdown
+    final_merged_text = process_report_markdown(raw_merged_text, topic=topic)
 
     # 7. 최종 파일 저장 (Append-only: p5)
     file_path = build_report_artifact_path(topic, "p5")

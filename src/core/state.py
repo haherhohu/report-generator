@@ -87,6 +87,7 @@ class ReportState(TypedDict):
     target_core_min_length: NotRequired[int]
     target_total_min_length: NotRequired[int]
     target_sections_for_loop: NotRequired[list[Any]]
+    reviewer_missing_chapters: NotRequired[list[str]]
     reviewer_feedback: NotRequired[str]
     next_step: NotRequired[str]
 

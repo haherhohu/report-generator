@@ -164,9 +164,22 @@ async def verify_and_correct_chunk(
   "hallucinations": ["발견된 환각 내용 요약"],
   "stance_violations": ["기정사실화 또는 조기 시사점 위반 요약"],
   "changelog": ["수정 사유 및 항목 목록"],
-  "corrected_content": "교정된 전체 마크다운 텍스트 (누락 없이 본문 전체 수록)"
+  "corrected_content": "교정된 마크다운 텍스트 (단, 원문이 6,000자 이상으로 매우 긴 경우 원문 수정 요약 또는 동일 원문 반환 가능)"
 }}
 """
+    # 초장문(6,000자 초과)은 LLM의 최대 출력 토큰(8192) 제한으로 인해 JSON 잘림/타임아웃이 발생하므로
+    # 결정론적 룰 기반 정제를 기본으로 확정하고 LLM에는 감사(Audit) 리포트 생성을 우선합니다.
+    if len(pre_cleaned) > 6000:
+        final_text = _apply_deterministic_rules(pre_cleaned)
+        final_text = normalize_markdown_headings(final_text, chap_num, metadata.get("section_number", "1."), sec_title)
+        return {
+            "passed": True,
+            "corrected_content": final_text,
+            "changelog": ["초장문 정밀 결정론적 규칙 및 정책 핫픽스 교열 적용"],
+            "hallucinations": [],
+            "stance_violations": [],
+        }
+
     try:
         res = await client.generate_text(verifier_prompt, response_mime_type="application/json")
         m = re.search(r"\{.*\}", res.text, re.DOTALL)
@@ -186,17 +199,155 @@ async def verify_and_correct_chunk(
     except Exception as e:
         logger.warning(f"[Verifier] AI 검증 호출 실패, 결정론적 교정본 유지: {e}")
 
+    final_text = _apply_deterministic_rules(pre_cleaned)
+    final_text = normalize_markdown_headings(final_text, chap_num, metadata.get("section_number", "1."), sec_title)
     return {
         "passed": True,
-        "corrected_content": pre_cleaned,
+        "corrected_content": final_text,
         "changelog": ["결정론적 룰 기반 교열 적용됨"],
         "hallucinations": [],
         "stance_violations": [],
     }
 
 
+def split_section_into_subchunks(content: str, max_chars: int = 3500) -> list[str]:
+    """
+    단일 섹션 마크다운을 H3/H4 소제목 및 문단 경계 기준으로 안전하게 분할.
+    표(Table)나 코드 블록 내부가 쪼개지지 않도록 방어.
+    """
+    if not content or len(content) <= max_chars:
+        return [content] if content else []
+
+    lines = content.splitlines()
+    subchunks: list[str] = []
+    current_lines: list[str] = []
+    in_code_block = False
+    in_table = False
+
+    def _flush():
+        nonlocal current_lines
+        txt = "\n".join(current_lines).strip()
+        if txt:
+            subchunks.append(txt)
+        current_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+        if stripped.startswith("|") and stripped.endswith("|"):
+            in_table = True
+        elif not stripped.startswith("|"):
+            in_table = False
+
+        is_sub_heading = (not in_code_block and not in_table and
+                          stripped.startswith(("### ", "#### ", "##### ")) and len(stripped) > 4)
+
+        current_len = sum(len(l) + 1 for l in current_lines)
+
+        # 소제목 경계이거나, 이미 길이가 충분히 차서 빈 줄 경계일 때 안전 분할
+        if is_sub_heading and current_len >= 1500:
+            _flush()
+        elif current_len >= max_chars and stripped == "" and not in_code_block and not in_table:
+            _flush()
+            continue
+
+        current_lines.append(line)
+
+    _flush()
+    return subchunks if subchunks else [content]
+
+
+async def verify_section_with_subchunks(
+    content: str,
+    metadata: dict[str, Any],
+    client: UnifiedModelClient,
+    strategic_stance: str = "",
+    allow_stance: bool = False,
+    max_chunk_chars: int = 3500,
+) -> dict[str, Any]:
+    """
+    섹션 원문이 대용량(3,500자 초과)인 경우 소제목 및 문단 단위 세부단락(Sub-chunks)으로 분할하여
+    각 단락별로 LLM 검증·교정을 수행하고, 분량 축소 방지 가드를 거쳐 무손실 재조립.
+    """
+    if not content:
+        return {
+            "passed": True,
+            "corrected_content": "",
+            "changelog": [],
+            "hallucinations": [],
+            "stance_violations": [],
+        }
+
+    # 3,500자 이하인 경우 바로 단일 청크 검증
+    if len(content) <= max_chunk_chars:
+        return await verify_and_correct_chunk(
+            content=content,
+            metadata=metadata,
+            client=client,
+            strategic_stance=strategic_stance,
+            allow_stance=allow_stance,
+        )
+
+    subchunks = split_section_into_subchunks(content, max_chars=max_chunk_chars)
+    if len(subchunks) <= 1:
+        return await verify_and_correct_chunk(
+            content=content,
+            metadata=metadata,
+            client=client,
+            strategic_stance=strategic_stance,
+            allow_stance=allow_stance,
+        )
+
+    # 서브 청크별 비동기 검증
+    sub_tasks = [
+        verify_and_correct_chunk(
+            content=chunk_text,
+            metadata=metadata,
+            client=client,
+            strategic_stance=strategic_stance,
+            allow_stance=allow_stance,
+        )
+        for chunk_text in subchunks
+    ]
+    sub_results = await asyncio.gather(*sub_tasks)
+
+    reassembled_parts: list[str] = []
+    all_changelogs: list[str] = []
+    all_hallucinations: list[str] = []
+    all_violations: list[str] = []
+    all_passed = True
+
+    for orig_chunk, res in zip(subchunks, sub_results):
+        corrected = res.get("corrected_content", "").strip()
+        # 분량 급감 가드: 요약으로 인한 15% 이상 축소 방지
+        if not corrected or len(corrected) < len(orig_chunk) * 0.85:
+            corrected = _apply_deterministic_rules(orig_chunk)
+
+        reassembled_parts.append(corrected)
+        if not res.get("passed", True):
+            all_passed = False
+        all_changelogs.extend(res.get("changelog", []))
+        all_hallucinations.extend(res.get("hallucinations", []))
+        all_violations.extend(res.get("stance_violations", []))
+
+    combined_text = "\n\n".join(reassembled_parts).strip()
+    sec_title = metadata.get("title", "")
+    chap_num = metadata.get("chapter_number", "")
+    sec_num = metadata.get("section_number", "1.")
+    final_text = normalize_markdown_headings(combined_text, chap_num, sec_num, sec_title)
+
+    return {
+        "passed": all_passed,
+        "corrected_content": final_text,
+        "changelog": list(dict.fromkeys(all_changelogs)),
+        "hallucinations": list(dict.fromkeys(all_hallucinations)),
+        "stance_violations": list(dict.fromkeys(all_violations)),
+    }
+
+
 async def run_verifier_async(state: ReportState) -> ReportState:
-    """Verifier 비동기 파이프라인 엔트리."""
+    """Verifier 비동기 파이프라인 엔트리 (동시성 4 병렬 처리 + 세부단락 분할 검증)."""
     expanded_sections = state.get("expanded_sections", [])
     if not expanded_sections:
         logger.warning("[Verifier] 검증할 expanded_sections가 없습니다.")
@@ -210,36 +361,42 @@ async def run_verifier_async(state: ReportState) -> ReportState:
     strategic_stance = str(knowledge_context.get("strategic_stance") or "")
     allowed_stance_roles = knowledge_context.get("allowed_stance_roles") or ["implication", "final_conclusion", "core_strategy"]
 
-    verification_reports = []
-    verified_sections = []
+    logger.info(f"[Verifier] 총 {len(expanded_sections)}개 섹션 품질 및 사실성 병렬 전수 검증 가동 (Sub-chunking 적용)...")
 
-    logger.info(f"[Verifier] 총 {len(expanded_sections)}개 섹션 품질 및 사실성 전수 검증 가동...")
+    concurrency_limit = asyncio.Semaphore(4)
 
-    for sec in expanded_sections:
-        raw_content = sec.get("content", "")
-        role_type = sec.get("role_type", "background_trend")
-        allow_stance = role_type in allowed_stance_roles
+    async def _process_section(sec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        async with concurrency_limit:
+            raw_content = sec.get("content", "")
+            role_type = sec.get("role_type", "background_trend")
+            allow_stance = role_type in allowed_stance_roles
 
-        v_res = await verify_and_correct_chunk(
-            raw_content,
-            metadata=sec,
-            client=client,
-            strategic_stance=strategic_stance,
-            allow_stance=allow_stance,
-        )
+            v_res = await verify_section_with_subchunks(
+                raw_content,
+                metadata=sec,
+                client=client,
+                strategic_stance=strategic_stance,
+                allow_stance=allow_stance,
+                max_chunk_chars=3500,
+            )
 
-        verified_sec = dict(sec)
-        verified_sec["content"] = v_res["corrected_content"]
-        verified_sections.append(verified_sec)
+            verified_sec = dict(sec)
+            verified_sec["content"] = v_res["corrected_content"]
 
-        verification_reports.append({
-            "section_title": sec.get("title", ""),
-            "chapter_number": sec.get("chapter_number", ""),
-            "passed": v_res["passed"],
-            "changelog": v_res["changelog"],
-            "hallucinations": v_res.get("hallucinations", []),
-            "stance_violations": v_res.get("stance_violations", []),
-        })
+            rep = {
+                "section_title": sec.get("title", ""),
+                "chapter_number": sec.get("chapter_number", ""),
+                "passed": v_res["passed"],
+                "changelog": v_res["changelog"],
+                "hallucinations": v_res.get("hallucinations", []),
+                "stance_violations": v_res.get("stance_violations", []),
+            }
+            return verified_sec, rep
+
+    results = await asyncio.gather(*[_process_section(sec) for sec in expanded_sections])
+
+    verified_sections = [r[0] for r in results]
+    verification_reports = [r[1] for r in results]
 
     state["expanded_sections"] = verified_sections
     state["verification_report"] = verification_reports

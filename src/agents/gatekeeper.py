@@ -94,12 +94,30 @@ def run_gatekeeper(state: ReportState) -> ReportState:
     if not sections:
         raise ValueError("[Gatekeeper] expanded_sections가 비어 있어 심사를 진행할 수 없습니다.")
 
-    # 1. Reviewer가 누락 챕터 등으로 루프를 지정한 경우 최우선 존중
-    target_for_loop = state.get("target_sections_for_loop", [])
-    if target_for_loop:
-        logger.warning(f"[Gatekeeper] -> [긴급] Reviewer 재작업 지시 감지: {target_for_loop}")
-        state["next_step"] = "researcher"
-        return state
+    max_loops = state.get("max_loops", DEFAULT_MAX_LOOPS)
+    current_loops = state.get("loop_count", 0)
+
+    # 1. Reviewer가 누락 챕터 등으로 루프를 명시한 경우 (최대 루프 한도 엄격 준수)
+    reviewer_missing = state.get("reviewer_missing_chapters", [])
+    if reviewer_missing:
+        if current_loops < max_loops:
+            next_loop = current_loops + 1
+            state["loop_count"] = next_loop
+            state["target_sections_for_loop"] = list(reviewer_missing)
+            state["reviewer_missing_chapters"] = []
+            state["next_step"] = "researcher"
+            logger.warning(
+                f"[Gatekeeper] -> [긴급] Reviewer 필수 챕터 누락 재작업 수용: {reviewer_missing} "
+                f"(진행 루프: {next_loop}/{max_loops})"
+            )
+            return state
+        else:
+            logger.warning(f"[Gatekeeper] -> Reviewer 재작업 요청이 있으나 최대 루프({max_loops}회) 소진으로 승인 심사 강제 진행.")
+            state["reviewer_missing_chapters"] = []
+            state["target_sections_for_loop"] = []
+    else:
+        # 이전 회차의 잔여 타겟 목록이 남아있다면 초기화
+        state["target_sections_for_loop"] = []
 
     report_type = state.get("report_type", "market_tech_trend")
     direction = state.get("direction", "")
