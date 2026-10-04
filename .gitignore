@@ -25,3 +25,6 @@ works/
 config/initial_state.yaml
 # 이건 ai 명령 히스토리임
 scratch.md 
+
+# mistakenly committed file
+nvidia_nim_gen_image.py
