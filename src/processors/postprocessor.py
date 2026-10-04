@@ -58,32 +58,15 @@ class ReportPostProcessor:
         except Exception as e:
             logger.warning(f"[PostProcessor] fact_stance_hotfix 적용 중 경고: {e}")
 
-        # Step 3: 비공개 내부문서 및 가상 조직/MOU(KURA 등), 정규식 아티팩트 전수 박멸
-        try:
-            from src.tools.apply_deep_purge_v3 import clean_draft_proposals_and_fictitious_entities
-            processed = clean_draft_proposals_and_fictitious_entities(processed)
-        except Exception as e:
-            logger.warning(f"[PostProcessor] deep_purge 적용 중 경고: {e}")
-
-        # Step 4: 표 및 그림 서식 정규화 (캡션 앞 개행 분리, 1x1 콜아웃 박스)
-        try:
-            from src.tools.apply_user_feedback_v2 import (
-                normalize_all_tables_v2,
-                normalize_all_figures_v2,
-            )
-            processed = normalize_all_tables_v2(processed)
-            processed = normalize_all_figures_v2(processed)
-        except Exception as e:
-            logger.warning(f"[PostProcessor] user_feedback_v2 표/그림 정규화 중 경고: {e}")
-
-        # Step 5: 사용자 피드백 18대 품질 혁신 정제 엔진 가동
+        # Step 3: 사용자 피드백 18대 품질 혁신 정제 엔진 가동
+        # (외래어·한자 정제, 더미 인용/태그 박멸, 메타독백/가상조직 박멸, 표/그림 서식 및 넘버링, 약어표/참고문헌 등 전수 처리)
         try:
             from src.processors.report_quality_enhancer import apply_all_quality_enhancements
             processed = apply_all_quality_enhancements(processed)
         except Exception as e:
             logger.warning(f"[PostProcessor] report_quality_enhancer 적용 중 경고: {e}")
 
-        # Step 6: 제목 및 Executive Summary (5줄 요약문) 무결성 확보
+        # Step 4: 제목 및 Executive Summary (5줄 요약문) 무결성 확보
         processed = self._ensure_executive_summary(processed, topic=topic)
 
         # 공백 개행 정돈 (최대 2줄 연속 빈 줄)

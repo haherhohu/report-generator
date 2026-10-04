@@ -96,11 +96,23 @@ def run_reviewer(state: ReportState) -> ReportState:
     missing_chapters = expected_chapters - present_chapters
     if missing_chapters:
         logger.warning(f"[Reviewer] 필수 챕터 누락 감지: {missing_chapters}")
+        state["reviewer_missing_chapters"] = list(missing_chapters)
         state["reviewer_feedback"] = f"누락된 챕터 {list(missing_chapters)}를 반드시 포함하여 생성하십시오."
-        state["target_sections_for_loop"] = list(missing_chapters)
-        return state
+    else:
+        state["reviewer_missing_chapters"] = []
+        state["reviewer_feedback"] = "구조 검토 완료: 모든 필수 챕터 구성이 충족되었습니다."
 
-    from src.agents.verifier import run_verifier
-    return run_verifier(state)
+    # 2. 각 섹션별 1차 결정론적 문체 정제 및 헤딩 정규화
+    polished_sections = []
+    for s in expanded_sections:
+        sec_copy = dict(s)
+        content = sec_copy.get("content", "")
+        if content:
+            sec_copy["content"] = _apply_deterministic_polish(content, tone)
+        polished_sections.append(sec_copy)
+
+    state["expanded_sections"] = polished_sections
+    logger.info(f"[Reviewer] 구조 검토 및 1차 문체 교열 완료 ({len(polished_sections)}개 섹션). Verifier 단계로 이관.")
+    return state
 
 

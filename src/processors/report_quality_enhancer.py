@@ -396,6 +396,18 @@ def purge_meta_commentary_and_dummy_tables(text: str) -> str:
             r"위\s*표는\s*제공된\s*자료에\s*기반한\s*사실을\s*정리한\s*것으로,\s*수치가\s*명시되지\s*않은\s*항목은\s*“N/A”\s*또는\s*해당\s*자료에\s*명시된\s*범위\s*내에서\s*기술함\.",
             "",
         ),
+        # 4. Fictitious entities & MOUs (KURA, fabricated alliances)
+        (r"한-유타\s*(?:UAS\s*)?(?:자율비행\s*및\s*신뢰성\(RAMS\)\s*실증\s*)?얼라이언스\(KURA\)", "한-유타 무인기 산업·실증 협력 거버넌스"),
+        (r"한-유타\s*(?:UAS\s*)?자율비행\s*및\s*신뢰성\(RAMS\)\s*실증\s*얼라이언스\(Korea-Utah\s*UAS\s*자율비행\s*및\s*신뢰성\s*RAMS\s*실증\s*얼라이언스\)", "한-유타 무인기 산업·실증 협력 거버넌스"),
+        (r"\bKURA\s*거버넌스", "한-유타 협력 거버넌스"),
+        (r"\bKURA\s*참여\s*기업", "협력 거버넌스 참여 기업"),
+        (r"\bKURA\s*는\b", "본 협력 거버넌스는"),
+        (r"\bKURA\s*의\b", "협력 거버넌스의"),
+        (r"\bKURA\s*와\b", "협력 거버넌스와"),
+        (r"\bKURA\s*를\b", "협력 거버넌스를"),
+        (r"\bKURA\s*에\b", "협력 거버넌스에"),
+        (r"\bKURA\b", "협력 거버넌스"),
+        (r"한미\s*공동\s*RAMS\s*실증\s*테스트베드\s*양해각서\(MOU\)", "한미 간 무인기 실증 데이터 교류 협력 프레임워크"),
     ]
 
     for pat, repl in defensive_phrases:

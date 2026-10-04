@@ -38,21 +38,21 @@ def _create_expansion_sections(
         chap_title = chap.get("title", "")
         role_type = chap.get("role_type", "background_trend")
 
-        # 챕터 성격별 차별화된 신규 심층 섹션 제목 부여
+        # 챕터 성격별 차별화된 신규 심층 섹션 제목 부여 (자연스러운 공문서식 명칭)
         if role_type == "background_trend":
-            new_sec_title = f"{chap_title} 관련 글로벌 선도 사례 및 실증 지표 심층 비교 (확장 {loop_idx}차)"
+            new_sec_title = f"{chap_title} 관련 글로벌 선도 사례 및 실증 지표 심층 비교"
         elif role_type == "empirical_case":
-            new_sec_title = f"{chap_title} 분야별 세부 장애요인 및 기업 격차 실태조사 (확장 {loop_idx}차)"
+            new_sec_title = f"{chap_title} 분야별 세부 장애요인 및 기업 격차 실태조사"
         elif role_type == "core_strategy":
-            new_sec_title = f"{chap_title} 세부 거버넌스 및 다자간 협력 모델 구체화 (확장 {loop_idx}차)"
+            new_sec_title = f"{chap_title} 세부 거버넌스 및 다자간 협력 모델 구체화"
         elif role_type == "action_plans":
-            new_sec_title = f"{chap_title} 연계 핵심 과제 및 인프라 구축 방안 (확장 {loop_idx}차)"
+            new_sec_title = f"{chap_title} 연계 핵심 과제 및 인프라 구축 방안"
         elif role_type == "roadmap":
-            new_sec_title = f"{chap_title} 연도별 마일스톤 및 리스크 관리 계획 (확장 {loop_idx}차)"
+            new_sec_title = f"{chap_title} 연도별 마일스톤 및 리스크 관리 계획"
         elif role_type == "implication":
-            new_sec_title = f"{chap_title} 분야별 중장기 파급효과 및 대응 제언 (확장 {loop_idx}차)"
+            new_sec_title = f"{chap_title} 분야별 중장기 파급효과 및 대응 제언"
         else:
-            new_sec_title = f"{chap_title} 세부 실증 분석 및 심층 벤치마킹 (확장 {loop_idx}차)"
+            new_sec_title = f"{chap_title} 세부 실증 분석 및 심층 벤치마킹"
 
         new_sec = {
             "section_id": new_sec_id,
@@ -79,7 +79,7 @@ def _create_expansion_sections(
         state.setdefault("sections", []).append(sec_flat)
 
         # 3. 신규 조사 키워드 도출
-        kw = f"{topic} {chap_title} 실증 사례 및 통계 (확장 {loop_idx})"
+        kw = f"{topic} {chap_title} 실증 사례 및 통계"
         new_keywords.append(kw)
         new_section_titles.append(new_sec_title)
 
@@ -97,27 +97,35 @@ def run_gatekeeper(state: ReportState) -> ReportState:
     max_loops = state.get("max_loops", DEFAULT_MAX_LOOPS)
     current_loops = state.get("loop_count", 0)
 
-    # 1. Reviewer가 누락 챕터 등으로 루프를 명시한 경우 (최대 루프 한도 엄격 준수)
+    # ★ 0. 최우선 하드 리밋(Hard Limit) 검사: 최대 루프 소진 시 어떤 예외도 없이 즉시 Merger 승인 이관
+    if current_loops >= max_loops:
+        logger.warning(
+            f"[Gatekeeper] 🛑 최대 루프 횟수({max_loops}회)에 도달했습니다. "
+            "추가 재작업 없이 즉시 최종 승인하여 Merger 단계로 강제 이관합니다."
+        )
+        state["reviewer_missing_chapters"] = []
+        state["target_sections_for_loop"] = []
+        state["next_step"] = "merger"
+        state["gatekeeper_decision"] = "HARD_LIMIT_APPROVAL"
+        return state
+
+    # 1. Reviewer가 누락 챕터 등으로 루프를 명시한 경우
     reviewer_missing = state.get("reviewer_missing_chapters", [])
     if reviewer_missing:
-        if current_loops < max_loops:
-            next_loop = current_loops + 1
-            state["loop_count"] = next_loop
-            state["target_sections_for_loop"] = list(reviewer_missing)
-            state["reviewer_missing_chapters"] = []
-            state["next_step"] = "researcher"
-            logger.warning(
-                f"[Gatekeeper] -> [긴급] Reviewer 필수 챕터 누락 재작업 수용: {reviewer_missing} "
-                f"(진행 루프: {next_loop}/{max_loops})"
-            )
-            return state
-        else:
-            logger.warning(f"[Gatekeeper] -> Reviewer 재작업 요청이 있으나 최대 루프({max_loops}회) 소진으로 승인 심사 강제 진행.")
-            state["reviewer_missing_chapters"] = []
-            state["target_sections_for_loop"] = []
-    else:
-        # 이전 회차의 잔여 타겟 목록이 남아있다면 초기화
-        state["target_sections_for_loop"] = []
+        next_loop = current_loops + 1
+        state["loop_count"] = next_loop
+        state["target_sections_for_loop"] = list(reviewer_missing)
+        state["reviewer_missing_chapters"] = []
+        state["next_step"] = "researcher"
+        state["gatekeeper_decision"] = f"MISSING_CHAPTER_LOOP_{next_loop}"
+        logger.warning(
+            f"[Gatekeeper] -> [긴급] Reviewer 필수 챕터 누락 재작업 수용: {reviewer_missing} "
+            f"(진행 루프: {next_loop}/{max_loops})"
+        )
+        return state
+
+    # 이전 회차의 잔여 타겟 목록 초기화
+    state["target_sections_for_loop"] = []
 
     report_type = state.get("report_type", "market_tech_trend")
     direction = state.get("direction", "")
@@ -149,22 +157,38 @@ def run_gatekeeper(state: ReportState) -> ReportState:
     core_ratio = sum(c.target_ratio for c in type_config.chapters if c.is_core) or 0.3
     core_target_chars = target_total * core_ratio
     core_70_threshold = core_target_chars * 0.7
+    soft_target_total = int(target_total * 0.85)  # 85% 이상 시 안정권 판정
 
     logger.info(
-        f"[Gatekeeper] 전체 분량: {total_chars:,}자 (목표: {target_total:,}자) | "
+        f"[Gatekeeper] 전체 분량: {total_chars:,}자 (목표: {target_total:,}자, 소프트 기준: {soft_target_total:,}자) | "
         f"코어 분량: {core_chars:,}자 (70% 기준: {core_70_threshold:,.0f}자)"
     )
+
+    state["current_chars"] = total_chars
 
     # 3. 코어 0자 결함 방어
     if core_chars == 0 and core_chapter_numbers:
         logger.warning("[Gatekeeper] -> [오류] 코어 전략 장이 0자입니다. 코어 챕터 작성을 강제합니다.")
+        state["loop_count"] = current_loops + 1
         state["target_sections_for_loop"] = list(core_chapter_numbers)
         state["next_step"] = "researcher"
+        state["gatekeeper_decision"] = "CORE_ZERO_RETRY"
+        return state
+
+    # 4. 소프트 타겟(85%) 충족 및 코어 방어선 통과 시 조기 최종 승인
+    if total_chars >= soft_target_total and core_chars >= core_70_threshold:
+        logger.info(
+            f"[Gatekeeper] -> [조기 최종 승인] 분량 목표의 85% 이상({total_chars:,}자/{soft_target_total:,}자) 및 "
+            f"코어 방어선({core_chars:,}자)을 안정적으로 달성했습니다. 무리한 증설 없이 Merger 단계로 이관합니다."
+        )
+        state["target_sections_for_loop"] = []
+        state["next_step"] = "merger"
+        state["gatekeeper_decision"] = "APPROVED_STABLE"
         return state
 
     loop_chapter_targets: list[str] = []
 
-    # 4. 코어 논리 방어 평가 (코어 장 억지 팽창 차단 -> 실증/배경 챕터 증설)
+    # 5. 코어 논리 방어 평가 (코어 장 억지 팽창 차단 -> 실증/배경 챕터 증설)
     if core_chars < core_70_threshold:
         logger.info(
             f"[Gatekeeper] -> [판단] 코어 논리 분량 미달 ({core_chars:,}자 < {core_70_threshold:,.0f}자). "
@@ -174,7 +198,7 @@ def run_gatekeeper(state: ReportState) -> ReportState:
     else:
         logger.info("[Gatekeeper] -> [통과] 코어 논리 분량 안정권 확보 (환각 방지 충족).")
 
-    # 5. 전체 분량 미달 시 실증/배경 챕터로 팽창 유도
+    # 6. 전체 분량 미달 시 실증/배경 챕터로 팽창 유도
     if total_chars < target_total:
         logger.info(f"[Gatekeeper] -> [판단] 전체 분량 미달 ({total_chars:,}자 < {target_total:,}자). 실증 데이터 보강 필요.")
         loop_chapter_targets.extend(list(empirical_chapter_numbers))
@@ -182,25 +206,22 @@ def run_gatekeeper(state: ReportState) -> ReportState:
     # 중복 제거된 대상 챕터
     unique_target_chapters = list(dict.fromkeys(loop_chapter_targets))
 
-    # 6. 루프 제어 (Hard limit: 기본 2회)
-    max_loops = state.get("max_loops", DEFAULT_MAX_LOOPS)
-    current_loops = state.get("loop_count", 0)
-
+    # 7. 신규 증설 루프 진입
     if unique_target_chapters and current_loops < max_loops:
         next_loop = current_loops + 1
         state["loop_count"] = next_loop
 
-        # ★ 사용자 피드백 반영: 기존 섹션 덮어쓰기 금지 -> 신규 목차(Section) 증설로 단조 증가 보장
+        # 신규 목차(Section) 증설로 단조 증가 보장
         new_titles, new_kws = _create_expansion_sections(
             state=state,
             target_chapter_numbers=unique_target_chapters,
             loop_idx=next_loop,
         )
 
-        # 신규 키워드 추가 및 루프 타겟 지정
         state.setdefault("keywords", []).extend(new_kws)
         state["target_sections_for_loop"] = new_titles
         state["next_step"] = "researcher"
+        state["gatekeeper_decision"] = f"EXPANSION_LOOP_{next_loop}"
 
         logger.info(
             f"[Gatekeeper] -> [신규 목차 증설 루프 진입] 기존 본문 보존 및 신규 섹션 {len(new_titles)}개 증설: {new_titles} "
@@ -208,8 +229,9 @@ def run_gatekeeper(state: ReportState) -> ReportState:
         )
         return state
 
-    logger.info("[Gatekeeper] -> [최종 승인] 모든 조건 충족 (또는 최대 루프 소진). Merger 단계로 이관.")
+    logger.info("[Gatekeeper] -> [최종 승인] 모든 조건 충족 (또는 한도 도달). Merger 단계로 이관.")
     state["target_sections_for_loop"] = []
     state["next_step"] = "merger"
+    state["gatekeeper_decision"] = "APPROVED"
     return state
 

@@ -13,6 +13,7 @@ from src.agents.drafter import run_drafter
 from src.agents.researcher import run_researcher
 from src.agents.expander import run_expander
 from src.agents.reviewer import run_reviewer
+from src.agents.verifier import run_verifier
 from src.agents.gatekeeper import run_gatekeeper
 from src.agents.merger import run_merger
 
@@ -26,14 +27,15 @@ def route_after_gatekeeper(state: ReportState) -> str:
 
 
 def create_report_graph() -> StateGraph:
-    """파이프라인 StateGraph 그래프 구조 생성."""
+    """파이프라인 StateGraph 7대 에이전트 그래프 구조 생성."""
     graph = StateGraph(ReportState)
 
-    # 1. 6대 에이전트 노드 등록
+    # 1. 7대 에이전트 독립 노드 등록
     graph.add_node("drafter", run_drafter)
     graph.add_node("researcher", run_researcher)
     graph.add_node("expander", run_expander)
     graph.add_node("reviewer", run_reviewer)
+    graph.add_node("verifier", run_verifier)
     graph.add_node("gatekeeper", run_gatekeeper)
     graph.add_node("merger", run_merger)
 
@@ -42,7 +44,8 @@ def create_report_graph() -> StateGraph:
     graph.add_edge("drafter", "researcher")
     graph.add_edge("researcher", "expander")
     graph.add_edge("expander", "reviewer")
-    graph.add_edge("reviewer", "gatekeeper")
+    graph.add_edge("reviewer", "verifier")
+    graph.add_edge("verifier", "gatekeeper")
 
     graph.add_conditional_edges(
         "gatekeeper",
@@ -58,13 +61,15 @@ def create_report_graph() -> StateGraph:
 
 
 def build_workflow_app(checkpoint_db_path: str | None = None) -> Any:
-    """체크포인터가 바인딩된 컴파일된 LangGraph 애플리케이션 반환."""
+    """체크포인터가 바인딩된 컴파일된 LangGraph 애플리케이션 반환 (WAL 최적화 적용)."""
     db_path = checkpoint_db_path or os.getenv(
         "LANGGRAPH_CHECKPOINT_DB", "workspace/checkpoints/report_pipeline.sqlite"
     )
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
     conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
     checkpointer = SqliteSaver(conn)
     checkpointer.setup()
 

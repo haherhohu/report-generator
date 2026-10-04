@@ -77,6 +77,7 @@ HP_NS = HWPX_NAMESPACES["hp"]
 HS_NS = HWPX_NAMESPACES["hs"]
 HC_NS = HWPX_NAMESPACES["hc"]
 HH_NS = HWPX_NAMESPACES["hh"]
+OPF_NS = HWPX_NAMESPACES["opf"]
 
 
 class MarkdownHWPXConverter:
@@ -91,6 +92,8 @@ class MarkdownHWPXConverter:
         self.mapping_path = Path(mapping_path)
         self.mapping = self._load_mapping()
         self._next_id = 1159820000
+        self.embedded_images: dict[str, tuple[str, bytes]] = {}  # binary_id -> (filename, bytes)
+        self.base_dir = Path("workspace/report")
 
     def _get_id(self) -> str:
         self._next_id += 1
@@ -182,6 +185,14 @@ class MarkdownHWPXConverter:
         new_sec_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
         template_files["Contents/section0.xml"] = new_sec_bytes
 
+        # 6-1. 임베딩 이미지 등록 (content.hpf 업데이트 및 BinData/ 추가)
+        if self.embedded_images:
+            if "Contents/content.hpf" in template_files:
+                template_files["Contents/content.hpf"] = self._enhance_content_hpf(template_files["Contents/content.hpf"])
+            for bin_id, (fname, bdata) in self.embedded_images.items():
+                template_files[f"BinData/{fname}"] = bdata
+            logger.info(f"🖼️ HWPX 패키지에 총 {len(self.embedded_images)}개 이미지 임베딩 완료")
+
         # 7. HWPX zip 패키지 생성 (mimetype은 압축 없이 첫 번째 파일로 수록)
         self._write_hwpx_package(out_path, template_files)
         logger.info(f"✅ HWPX 문서 변환 완료: {out_path}")
@@ -193,11 +204,31 @@ class MarkdownHWPXConverter:
         if not src.exists():
             raise FileNotFoundError(f"원본 마크다운 파일을 찾을 수 없습니다: {markdown_path}")
 
+        self.embedded_images.clear()
+        if hasattr(self, "_registered_meta"):
+            self._registered_meta.clear()
+        self.base_dir = src.parent
+
         raw_md = src.read_text(encoding="utf-8")
         if not output_path:
             output_path = src.with_suffix(".hwpx")
 
         return self.convert_text(raw_md, output_path)
+
+    def _enhance_content_hpf(self, hpf_bytes: bytes) -> bytes:
+        """content.hpf의 opf:manifest에 임베딩된 이미지 항목들을 등록."""
+        if not self.embedded_images:
+            return hpf_bytes
+        hpf_str = hpf_bytes.decode("utf-8")
+        new_items = []
+        for bin_id, (fname, _) in self.embedded_images.items():
+            mime = "image/jpeg" if fname.lower().endswith((".jpg", ".jpeg")) else "image/png"
+            new_items.append(f'<opf:item id="{bin_id}" href="BinData/{fname}" media-type="{mime}" isEmbeded="1"/>')
+
+        insert_marker = "</opf:manifest>"
+        if insert_marker in hpf_str:
+            hpf_str = hpf_str.replace(insert_marker, "".join(new_items) + insert_marker)
+        return hpf_str.encode("utf-8")
 
     def _enhance_header_xml(self, header_bytes: bytes) -> bytes:
         """
@@ -387,7 +418,7 @@ class MarkdownHWPXConverter:
             elif cat == "LIST":
                 if last_cat not in ("START", "EMPTY", "HEADING_PAGEBREAK", "LIST"):
                     need_space_before = True
-            elif cat in ("TABLE", "FIGURE_BOX"):
+            elif cat in ("TABLE", "FIGURE_BOX", "FIGURE_IMAGE"):
                 if last_cat not in ("START", "EMPTY", "HEADING_PAGEBREAK", "CAPTION"):
                     need_space_before = True
 
@@ -510,6 +541,20 @@ class MarkdownHWPXConverter:
                 bold_text = f"**{h_text}**" if not (h_text.startswith("**") and h_text.endswith("**")) else h_text
                 p_cfg = self.mapping["content"]["body_paragraph"]
                 append_elem(self._build_paragraph(bold_text, p_cfg, parse_bold=True), "BODY")
+                i += 1
+                continue
+
+            # 7-0. 마크다운 이미지 태그 (![alt](path)) 감지
+            img_match = re.match(r"^!\[(.*?)\]\((.*?)\)", line)
+            if img_match:
+                alt_txt = img_match.group(1).strip()
+                img_path = img_match.group(2).strip()
+                bin_id = self._register_image(img_path)
+                if bin_id:
+                    pic_elem = self._build_picture_element(bin_id, alt_txt)
+                    append_elem(pic_elem, "FIGURE_IMAGE")
+                else:
+                    logger.warning(f"이미지 등록 건너뜀 (파일 미발견): {img_path}")
                 i += 1
                 continue
 
@@ -735,6 +780,127 @@ class MarkdownHWPXConverter:
         ET.SubElement(tc, f"{{{HP_NS}}}cellSz", {"width": "49000", "height": "6000"})
         ET.SubElement(tc, f"{{{HP_NS}}}cellMargin", {"left": "283", "right": "283", "top": "283", "bottom": "283"})
 
+        return p
+
+    def _register_image(self, img_path_str: str) -> str | None:
+        """이미지 파일을 찾아 바이너리 딕셔너리에 등록하고 식별자 반환."""
+        p = Path(img_path_str)
+        target_path: Path | None = None
+        if not p.is_absolute():
+            candidates = [
+                (self.base_dir / p).resolve(),
+                p.resolve(),
+                (Path("workspace/report") / p).resolve(),
+                (Path("workspace/report/images") / p.name).resolve(),
+            ]
+            for c in candidates:
+                if c.exists() and c.is_file():
+                    target_path = c
+                    break
+        else:
+            if p.exists() and p.is_file():
+                target_path = p
+
+        if not target_path:
+            logger.warning(f"이미지 파일을 찾을 수 없습니다: {img_path_str} (base_dir: {self.base_dir})")
+            return None
+
+        if not hasattr(self, "_registered_meta"):
+            self._registered_meta = {}
+
+        for bin_id, (fname, bdata, orig_path) in self._registered_meta.items():
+            if orig_path == str(target_path):
+                return bin_id
+
+        idx = len(self.embedded_images) + 1
+        bin_id = f"image_{idx}"
+        ext = target_path.suffix.lower()
+        if ext not in (".png", ".jpg", ".jpeg"):
+            ext = ".png"
+        filename = f"image_{idx}{ext}"
+
+        bdata = target_path.read_bytes()
+        self.embedded_images[bin_id] = (filename, bdata)
+        self._registered_meta[bin_id] = (filename, bdata, str(target_path))
+        logger.info(f"🖼️ 이미지 등록 완료: {target_path.name} -> {bin_id} ({filename}, {len(bdata):,} bytes)")
+        return bin_id
+
+    def _build_picture_element(self, binary_id: str, alt_text: str = "", width: int = 42000, height: int = 23625) -> ET.Element:
+        """16:9 비율(기본 42000x23625 hwpunit)의 HWPX 이미지 문단 엘리먼트 생성."""
+        p = ET.Element(
+            f"{{{HP_NS}}}p",
+            {
+                "id": self._get_id(),
+                "paraPrIDRef": "19",  # 중앙 정렬
+                "styleIDRef": "0",
+                "pageBreak": "0",
+                "columnBreak": "0",
+                "merged": "0",
+            },
+        )
+        run = ET.SubElement(p, f"{{{HP_NS}}}run", {"charPrIDRef": "0"})
+        pic = ET.SubElement(
+            run,
+            f"{{{HP_NS}}}pic",
+            {
+                "id": self._get_id(),
+                "zOrder": "0",
+                "numberingType": "PICTURE",
+                "textWrap": "TOP_AND_BOTTOM",
+                "textFlow": "BOTH_SIDES",
+                "lock": "0",
+                "dropcapstyle": "None",
+                "href": "",
+                "groupLevel": "0",
+                "instid": self._get_id(),
+                "reverse": "0",
+            },
+        )
+        ET.SubElement(pic, f"{{{HP_NS}}}offset", {"x": "0", "y": "0"})
+        ET.SubElement(pic, f"{{{HP_NS}}}orgSz", {"width": str(width), "height": str(height)})
+        ET.SubElement(pic, f"{{{HP_NS}}}curSz", {"width": str(width), "height": str(height)})
+        ET.SubElement(pic, f"{{{HP_NS}}}flip", {"horizontal": "0", "vertical": "0"})
+        ET.SubElement(pic, f"{{{HP_NS}}}rotationInfo", {"angle": "0"})
+
+        rend = ET.SubElement(pic, f"{{{HP_NS}}}renderingInfo")
+        ET.SubElement(rend, f"{{{HC_NS}}}transMatrix", {"e1": "1", "e2": "0", "e3": "0", "e4": "0", "e5": "1", "e6": "0"})
+        ET.SubElement(rend, f"{{{HC_NS}}}scaMatrix", {"e1": "1", "e2": "0", "e3": "0", "e4": "0", "e5": "1", "e6": "0"})
+        ET.SubElement(rend, f"{{{HC_NS}}}rotMatrix", {"e1": "1", "e2": "0", "e3": "0", "e4": "0", "e5": "1", "e6": "0"})
+
+        img_rect = ET.SubElement(pic, f"{{{HP_NS}}}imgRect")
+        ET.SubElement(img_rect, f"{{{HC_NS}}}pt0", {"x": "0", "y": "0"})
+        ET.SubElement(img_rect, f"{{{HC_NS}}}pt1", {"x": str(width), "y": "0"})
+        ET.SubElement(img_rect, f"{{{HC_NS}}}pt2", {"x": str(width), "y": str(height)})
+        ET.SubElement(img_rect, f"{{{HC_NS}}}pt3", {"x": "0", "y": str(height)})
+
+        ET.SubElement(pic, f"{{{HP_NS}}}imgClip", {"left": "0", "right": str(width), "top": "0", "bottom": str(height)})
+        ET.SubElement(pic, f"{{{HP_NS}}}inMargin", {"left": "0", "right": "0", "top": "0", "bottom": "0"})
+        ET.SubElement(pic, f"{{{HP_NS}}}imgDim", {"dimwidth": str(width), "dimheight": str(height)})
+        ET.SubElement(pic, f"{{{HC_NS}}}img", {"binaryItemIDRef": binary_id, "bright": "0", "contrast": "0", "effect": "REAL_PIC", "alpha": "0"})
+        ET.SubElement(pic, f"{{{HP_NS}}}effects")
+        ET.SubElement(pic, f"{{{HP_NS}}}sz", {"width": str(width), "widthRelTo": "ABSOLUTE", "height": str(height), "heightRelTo": "ABSOLUTE", "protect": "0"})
+        ET.SubElement(
+            pic,
+            f"{{{HP_NS}}}pos",
+            {
+                "treatAsChar": "1",
+                "affectLSpacing": "0",
+                "flowWithText": "1",
+                "allowOverlap": "0",
+                "holdAnchorAndSO": "0",
+                "vertRelTo": "PARA",
+                "horzRelTo": "COLUMN",
+                "vertAlign": "TOP",
+                "horzAlign": "LEFT",
+                "vertOffset": "0",
+                "horzOffset": "0",
+            },
+        )
+        ET.SubElement(pic, f"{{{HP_NS}}}outMargin", {"left": "0", "right": "0", "top": "0", "bottom": "0"})
+        shape_comment = ET.SubElement(pic, f"{{{HP_NS}}}shapeComment")
+        shape_comment.text = f"그림: {alt_text}" if alt_text else "그림"
+
+        ET.SubElement(run, f"{{{HP_NS}}}t")
         return p
 
     def _build_table_from_rows(self, parsed_rows: list[list[str]]) -> ET.Element | None:

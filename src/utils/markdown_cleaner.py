@@ -514,6 +514,10 @@ def generate_executive_summary(title: str, body_text: str) -> str:
     while len(summary_sentences) < 5:
         summary_sentences.append(f"본 보고서는 {clean_title} 관련 핵심 현황을 분석하고 전략적 실행 방안을 제시한다.")
 
+    quote_lines = ["> **【Executive Summary: 핵심 요약】**"]
+    for s in summary_sentences[:5]:
+        quote_lines.append(f"> - {s}")
+
     return "\n".join(quote_lines)
 
 
